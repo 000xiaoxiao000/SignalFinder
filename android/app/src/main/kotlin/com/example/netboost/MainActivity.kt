@@ -615,6 +615,7 @@ class MainActivity : FlutterActivity() {
 
     private fun estimateDistanceFromSignal(dbm: Int?, radio: String?): Double? {
         if (!isUsableDbm(dbm)) return null
+        val dbmValue = dbm ?: return null
         val exponent = when {
             radio?.contains("NR", ignoreCase = true) == true ||
                 radio?.contains("5G", ignoreCase = true) == true -> 3.4
@@ -627,7 +628,7 @@ class MainActivity : FlutterActivity() {
         val referenceDbm = -85
         val referenceDistanceMeters = 100.0
         val distance = referenceDistanceMeters *
-            10.0.pow((referenceDbm - dbm) / (10.0 * exponent))
+            10.0.pow((referenceDbm - dbmValue) / (10.0 * exponent))
         return distance.coerceIn(20.0, 30000.0)
     }
 
