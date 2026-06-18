@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "towers": [
+    {
+      "key": "LTE:12345:67890123",
+      "radio": "LTE",
+      "area": 12345,
+      "cellId": 67890123,
+      "lat": 31.230416,
+      "lon": 121.473701,
+      "referenceRsrpDbm": -85,
+      "referenceDistanceMeters": 100,
+      "pathLossExponent": 3.2,
+      "note": "Example only. Replace with collected or licensed tower coordinates."
+    }
+  ]
+}

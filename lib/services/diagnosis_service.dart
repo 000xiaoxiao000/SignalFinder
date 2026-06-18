@@ -1,0 +1,188 @@
+import '../models/network_status.dart';
+
+enum DiagnosisIssue {
+  highLatency,
+  packetLoss,
+  slowSpeed,
+  dnsIssue,
+  noConnection,
+  unstableConnection,
+  crowdedNetwork,
+  ok,
+}
+
+class DiagnosisResult {
+  final List<DiagnosisIssue> issues;
+  final String summary;
+  final List<DiagnosisTip> tips;
+  final int score; // 0-100
+
+  const DiagnosisResult({
+    required this.issues,
+    required this.summary,
+    required this.tips,
+    required this.score,
+  });
+}
+
+class DiagnosisTip {
+  final String title;
+  final String detail;
+  final String icon;
+  final TipPriority priority;
+  final DiagnosisTipAction? action;
+
+  const DiagnosisTip({
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.priority,
+    this.action,
+  });
+}
+
+enum TipPriority { high, medium, low }
+
+enum DiagnosisTipAction { temporaryBackgroundRefreshPause }
+
+class DiagnosisService {
+  DiagnosisResult diagnose(NetworkStatus status) {
+    if (!status.isConnected) {
+      return const DiagnosisResult(
+        issues: [DiagnosisIssue.noConnection],
+        summary: '当前没有网络连接',
+        score: 0,
+        tips: [
+          DiagnosisTip(
+            icon: '📡',
+            title: '检查飞行模式',
+            detail: '确认手机没有开启飞行模式，移动数据已打开。',
+            priority: TipPriority.high,
+          ),
+          DiagnosisTip(
+            icon: '🔄',
+            title: '重启网络',
+            detail: '关闭再打开移动数据，或切换到 WiFi。',
+            priority: TipPriority.high,
+          ),
+        ],
+      );
+    }
+
+    final issues = <DiagnosisIssue>[];
+    final tips = <DiagnosisTip>[];
+    int score = 100;
+
+    // Latency check
+    if (status.pingMs > 300) {
+      issues.add(DiagnosisIssue.highLatency);
+      score -= 30;
+      tips.add(const DiagnosisTip(
+        icon: '⚡',
+        title: '延迟过高',
+        detail: '当前延迟超过 300ms，网页加载和应用响应会明显变慢。尝试走到信号更好的地方，或远离人群密集区域。',
+        priority: TipPriority.high,
+      ));
+    } else if (status.pingMs > 150) {
+      issues.add(DiagnosisIssue.highLatency);
+      score -= 15;
+      tips.add(const DiagnosisTip(
+        icon: '⚡',
+        title: '延迟偏高',
+        detail: '延迟在 150-300ms，轻度影响使用体验。',
+        priority: TipPriority.medium,
+      ));
+    }
+
+    // Packet loss check
+    if (status.packetLossPercent >= 30) {
+      issues.add(DiagnosisIssue.packetLoss);
+      score -= 30;
+      tips.add(const DiagnosisTip(
+        icon: '📉',
+        title: '严重丢包',
+        detail: '丢包率超过 30%，可能正处于基站覆盖边缘或地下深层。建议换个位置或等到人少时再用。',
+        priority: TipPriority.high,
+      ));
+    } else if (status.packetLossPercent >= 10) {
+      issues.add(DiagnosisIssue.packetLoss);
+      score -= 15;
+      tips.add(const DiagnosisTip(
+        icon: '📉',
+        title: '存在丢包',
+        detail: '丢包率 10-30%，部分请求会失败。视频通话和游戏体验会受影响。',
+        priority: TipPriority.medium,
+      ));
+    }
+
+    // Speed check
+    if (status.downloadSpeedMbps > 0 && status.downloadSpeedMbps < 1) {
+      issues.add(DiagnosisIssue.slowSpeed);
+      score -= 20;
+      tips.add(const DiagnosisTip(
+        icon: '🐢',
+        title: '下载速度极慢',
+        detail: '当前下载速度低于 1Mbps，看视频和下载文件会非常慢。关闭不用的 App，减少带宽占用。',
+        priority: TipPriority.high,
+      ));
+    }
+
+    // Crowded network detection: high latency + packet loss on mobile
+    if (status.type != NetworkType.wifi &&
+        status.pingMs > 150 &&
+        status.packetLossPercent > 5) {
+      issues.add(DiagnosisIssue.crowdedNetwork);
+      tips.add(const DiagnosisTip(
+        icon: '👥',
+        title: '可能处于人多场景',
+        detail:
+            '综合判断当前可能在地铁、商场等人密集区域，基站超载导致网速下降。\n建议：①提前缓存内容；②切换到 4G（关闭 5G）；③优选更快的 DNS。',
+        priority: TipPriority.high,
+      ));
+    }
+
+    // General tips
+    tips.add(const DiagnosisTip(
+      icon: '🌐',
+      title: '优化 DNS 可提速',
+      detail: '运营商默认 DNS 在高峰期响应较慢。使用本 App 的"DNS 测速"功能找到更快的 DNS，可减少网页打开时间。',
+      priority: TipPriority.medium,
+    ));
+
+    if (status.type == NetworkType.mobile5G) {
+      tips.add(const DiagnosisTip(
+        icon: '📶',
+        title: '尝试切换到 4G',
+        detail: '5G 在地下或人群中穿透力差。进入手机设置 → 移动网络 → 首选网络类型，选择 LTE/4G。',
+        priority: TipPriority.medium,
+      ));
+    }
+
+    tips.add(const DiagnosisTip(
+      icon: '🔄',
+      title: '暂时关闭后台应用刷新',
+      detail:
+          '选择一个临时时长作为提醒，然后进入系统应用设置，关闭不常用 App 的后台数据权限，把带宽留给当前正在用的 App。到时后再恢复需要后台联网的应用。',
+      priority: TipPriority.low,
+      action: DiagnosisTipAction.temporaryBackgroundRefreshPause,
+    ));
+
+    String summary;
+    if (score >= 80) {
+      summary = '网络状态良好，无明显问题';
+    } else if (score >= 60) {
+      summary = '网络存在轻微问题，体验有所下降';
+    } else if (score >= 40) {
+      summary = '网络质量较差，建议按提示优化';
+    } else {
+      summary = '网络严重拥塞，强烈建议换个位置';
+    }
+
+    return DiagnosisResult(
+      issues: issues.isEmpty ? [DiagnosisIssue.ok] : issues,
+      summary: summary,
+      tips: tips,
+      score: score.clamp(0, 100),
+    );
+  }
+}
