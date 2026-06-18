@@ -558,7 +558,7 @@ class MainActivity : FlutterActivity() {
                     "distanceLabel" to formatSignalModelDistance(dbm, radio),
                     "distanceMethod" to signalModelMethod(dbm),
                     "estimatedDistanceMeters" to estimateDistanceFromSignal(dbm, radio)?.roundToInt(),
-                    "refreshNote" to "已读取小区信号；点位不足，已用信号模型粗略估算距离",
+                    "refreshNote" to "已读取小区信号；已用路径损耗算法估算基站距离",
                 )
             }
         }
@@ -582,7 +582,7 @@ class MainActivity : FlutterActivity() {
                     "distanceLabel" to formatSignalModelDistance(dbm, radio),
                     "distanceMethod" to signalModelMethod(dbm),
                     "estimatedDistanceMeters" to estimateDistanceFromSignal(dbm, radio)?.roundToInt(),
-                    "refreshNote" to "已读取小区信号；部分小区缺少基站经纬度点位",
+                    "refreshNote" to "已读取小区信号；缺少点位的小区已用路径损耗算法估算距离",
                 )
             } else {
                 val distance = haversineMeters(position.lat, position.lon, tower.lat, tower.lon)
@@ -593,7 +593,7 @@ class MainActivity : FlutterActivity() {
                     "estimatedLatitude" to position.lat,
                     "estimatedLongitude" to position.lon,
                     "estimationConfidenceMeters" to position.confidenceMeters.roundToInt(),
-                    "refreshNote" to "已基于RSRP和基站点位估计距离",
+                    "refreshNote" to "已通过多基站WLS算法估算基站距离",
                 )
             }
         }
@@ -604,13 +604,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun signalModelMethod(dbm: Int?): String {
-        return if (isUsableDbm(dbm)) "信号模型估算" else "信号不足"
+        return if (isUsableDbm(dbm)) "路径损耗算法" else "信号不足"
     }
 
     private fun formatSignalModelDistance(dbm: Int?, radio: String?): String {
         val distance = estimateDistanceFromSignal(dbm, radio)
             ?: return "信号不足，暂无法估算"
-        return "约 ${formatMeters(distance)} · 粗估"
+        return "约 ${formatMeters(distance)} · 算法估算"
     }
 
     private fun estimateDistanceFromSignal(dbm: Int?, radio: String?): Double? {

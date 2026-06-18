@@ -57,8 +57,8 @@ class CellSignal {
         pci: _intFromMapValue(map['pci']),
         arfcn: _intFromMapValue(map['arfcn']),
         operatorName: map['operatorName'] as String? ?? '',
-        distanceLabel: map['distanceLabel'] as String? ?? '需至少3个有点位的小区',
-        distanceMethod: map['distanceMethod'] as String? ?? 'WLS待计算',
+        distanceLabel: map['distanceLabel'] as String? ?? '信号不足，暂无法估算',
+        distanceMethod: map['distanceMethod'] as String? ?? '信号不足',
         refreshNote: map['refreshNote'] as String? ?? '',
         estimatedDistanceMeters:
             _intFromMapValue(map['estimatedDistanceMeters']),

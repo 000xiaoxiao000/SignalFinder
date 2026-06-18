@@ -184,11 +184,11 @@ class NetworkProvider extends ChangeNotifier {
       (signal) => signal.distanceMethod == '加权最小二乘',
     );
     if (hasWlsDistance) return '刷新完成，已使用加权最小二乘估计基站距离';
-    final hasSignalModelDistance = signals.any(
-      (signal) => signal.distanceMethod == '信号模型估算',
+    final hasPathLossDistance = signals.any(
+      (signal) => signal.distanceMethod == '路径损耗算法',
     );
-    if (hasSignalModelDistance) {
-      return '刷新完成，已用信号强度模型粗略估算距离；3个以上点位可提升为WLS';
+    if (hasPathLossDistance) {
+      return '刷新完成，已通过路径损耗算法估算基站距离';
     }
     return '刷新完成，已读取 ${signals.length} 个小区；信号不足，暂无法估算距离';
   }
