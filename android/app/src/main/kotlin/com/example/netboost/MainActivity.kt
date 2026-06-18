@@ -334,7 +334,8 @@ class MainActivity : FlutterActivity() {
                 "pci" to null,
                 "arfcn" to null,
                 "operatorName" to telephonyManager.networkOperatorName.orEmpty(),
-                "distanceLabel" to "需至少3个有点位的小区",
+                "distanceLabel" to formatSignalModelDistance(dbm, getMobileNetworkGeneration()),
+                "distanceMethod" to signalModelMethod(dbm),
                 "refreshNote" to refreshNote,
                 "fallback" to true,
             )
@@ -538,6 +539,7 @@ class MainActivity : FlutterActivity() {
             val cellKey = signal["cellKey"] as? String ?: return@mapNotNull null
             val tower = towerPointDatabase[cellKey] ?: return@mapNotNull null
             val dbm = signal["dbm"] as? Int ?: return@mapNotNull null
+            if (!isUsableDbm(dbm)) return@mapNotNull null
             val distance = estimateDistanceFromRsrp(dbm, tower)
             TowerMeasurement(
                 cellKey = cellKey,
@@ -550,10 +552,13 @@ class MainActivity : FlutterActivity() {
 
         if (measurements.size < 3) {
             return signals.map { signal ->
+                val dbm = signal["dbm"] as? Int
+                val radio = signal["radio"] as? String
                 signal + mapOf(
-                    "distanceLabel" to "需至少3个有点位的小区",
-                    "distanceMethod" to "WLS待计算",
-                    "refreshNote" to "已读取小区信号；距离估计还缺基站经纬度点位",
+                    "distanceLabel" to formatSignalModelDistance(dbm, radio),
+                    "distanceMethod" to signalModelMethod(dbm),
+                    "estimatedDistanceMeters" to estimateDistanceFromSignal(dbm, radio)?.roundToInt(),
+                    "refreshNote" to "已读取小区信号；点位不足，已用信号模型粗略估算距离",
                 )
             }
         }
@@ -571,9 +576,12 @@ class MainActivity : FlutterActivity() {
             val cellKey = signal["cellKey"] as? String
             val tower = cellKey?.let { towerPointDatabase[it] }
             if (tower == null) {
+                val dbm = signal["dbm"] as? Int
+                val radio = signal["radio"] as? String
                 signal + mapOf(
-                    "distanceLabel" to "无该小区点位",
-                    "distanceMethod" to "WLS待计算",
+                    "distanceLabel" to formatSignalModelDistance(dbm, radio),
+                    "distanceMethod" to signalModelMethod(dbm),
+                    "estimatedDistanceMeters" to estimateDistanceFromSignal(dbm, radio)?.roundToInt(),
                     "refreshNote" to "已读取小区信号；部分小区缺少基站经纬度点位",
                 )
             } else {
@@ -589,6 +597,38 @@ class MainActivity : FlutterActivity() {
                 )
             }
         }
+    }
+
+    private fun isUsableDbm(dbm: Int?): Boolean {
+        return dbm != null && dbm != Int.MAX_VALUE && dbm in -140..-40
+    }
+
+    private fun signalModelMethod(dbm: Int?): String {
+        return if (isUsableDbm(dbm)) "信号模型估算" else "信号不足"
+    }
+
+    private fun formatSignalModelDistance(dbm: Int?, radio: String?): String {
+        val distance = estimateDistanceFromSignal(dbm, radio)
+            ?: return "信号不足，暂无法估算"
+        return "约 ${formatMeters(distance)} · 粗估"
+    }
+
+    private fun estimateDistanceFromSignal(dbm: Int?, radio: String?): Double? {
+        if (!isUsableDbm(dbm)) return null
+        val exponent = when {
+            radio?.contains("NR", ignoreCase = true) == true ||
+                radio?.contains("5G", ignoreCase = true) == true -> 3.4
+            radio?.contains("LTE", ignoreCase = true) == true ||
+                radio?.contains("4G", ignoreCase = true) == true -> 3.2
+            radio?.contains("GSM", ignoreCase = true) == true -> 3.7
+            radio?.contains("CDMA", ignoreCase = true) == true -> 3.5
+            else -> 3.4
+        }
+        val referenceDbm = -85
+        val referenceDistanceMeters = 100.0
+        val distance = referenceDistanceMeters *
+            10.0.pow((referenceDbm - dbm) / (10.0 * exponent))
+        return distance.coerceIn(20.0, 30000.0)
     }
 
     private fun estimateDistanceFromRsrp(dbm: Int, tower: TowerPoint): Double {

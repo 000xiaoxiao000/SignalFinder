@@ -294,6 +294,12 @@ class _CellSignalCard extends StatelessWidget {
                 'WLS 估计位置：置信半径约 ${signal.estimationConfidenceMeters ?? 0} m。距离是基于 RSRP 和已知基站点位估算，不是运营商精确定位。',
                 style: TextStyle(color: color, fontSize: 12, height: 1.4),
               ),
+            ] else if (signal.distanceMethod == '信号模型估算') ...[
+              const SizedBox(height: 8),
+              Text(
+                '当前为基于 dBm/RSRP 的路径损耗粗估；缺少3个以上基站点位时不能做多点定位。',
+                style: TextStyle(color: color, fontSize: 12, height: 1.4),
+              ),
             ],
             const SizedBox(height: 14),
             Row(
@@ -446,7 +452,11 @@ class _GlossaryCard extends StatelessWidget {
           ),
           _GlossaryItem(
             term: '基站距离',
-            detail: '本应用采用基于 RSRP 和基站经纬度点位的加权最小二乘估计。至少需要3个有点位的小区；没有点位时只显示缺失原因。',
+            detail: '有3个以上基站点位时采用基于 RSRP 和经纬度的加权最小二乘估计；点位不足时用信号强度路径损耗模型给出粗略距离。',
+          ),
+          _GlossaryItem(
+            term: '信号模型估算',
+            detail: '根据 dBm/RSRP 和常见路径损耗指数粗略换算距离。室内遮挡、反射、基站功率和频段都会造成明显偏差。',
           ),
           _GlossaryItem(
             term: 'WLS',
