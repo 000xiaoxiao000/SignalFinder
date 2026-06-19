@@ -26,6 +26,7 @@ class NetworkProvider extends ChangeNotifier {
   DiagnosisResult? _diagnosisResult;
   NetworkTuningStatus _tuningStatus = NetworkTuningStatus.empty();
   AppWhitelistVpnStatus _appWhitelistVpnStatus = AppWhitelistVpnStatus.empty();
+  bool _hasUsageStatsPermission = false;
   RootStatus _rootStatus = RootStatus.unknown();
   RootCommandResult _lastRootCommandResult = RootCommandResult.empty();
   String? _lockedCellSignalId;
@@ -56,6 +57,7 @@ class NetworkProvider extends ChangeNotifier {
   DiagnosisResult? get diagnosisResult => _diagnosisResult;
   NetworkTuningStatus get tuningStatus => _tuningStatus;
   AppWhitelistVpnStatus get appWhitelistVpnStatus => _appWhitelistVpnStatus;
+  bool get hasUsageStatsPermission => _hasUsageStatsPermission;
   Set<String> get selectedWhitelistPackages =>
       _appWhitelistVpnStatus.allowedPackages.toSet();
   RootStatus get rootStatus => _rootStatus;
@@ -225,6 +227,8 @@ class NetworkProvider extends ChangeNotifier {
 
     try {
       final apps = await _networkService.getInstalledApps();
+      _hasUsageStatsPermission =
+          await _networkService.hasUsageStatsPermission();
       final status = await _networkService.getAppWhitelistVpnStatus();
       _installedApps = apps;
       _appWhitelistVpnStatus = status;
@@ -398,6 +402,10 @@ class NetworkProvider extends ChangeNotifier {
 
   Future<void> openVpnSettings() async {
     await _networkService.openVpnSettings();
+  }
+
+  Future<void> openUsageAccessSettings() async {
+    await _networkService.openUsageAccessSettings();
   }
 
   Future<void> setHighPerfWifiLock(bool enabled) async {
