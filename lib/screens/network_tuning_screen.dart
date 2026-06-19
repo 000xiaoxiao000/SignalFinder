@@ -16,6 +16,7 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<NetworkProvider>().refreshNetworkTuningStatus();
+      context.read<NetworkProvider>().refreshAppWhitelistVpn();
     });
   }
 
@@ -118,6 +119,7 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
                 actionLabel: '打开省流量设置',
                 onAction: provider.openDataSaverSettings,
               ),
+              const _AppWhitelistVpnCard(),
               _TuningCard(
                 title: '5G SA / 首选网络类型',
                 capability: '需系统/厂商权限',
@@ -166,6 +168,172 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
               ),
               const SizedBox(height: 32),
             ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AppWhitelistVpnCard extends StatefulWidget {
+  const _AppWhitelistVpnCard();
+
+  @override
+  State<_AppWhitelistVpnCard> createState() => _AppWhitelistVpnCardState();
+}
+
+class _AppWhitelistVpnCardState extends State<_AppWhitelistVpnCard> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<NetworkProvider>(
+      builder: (context, provider, _) {
+        final status = provider.appWhitelistVpnStatus;
+        final selected = provider.selectedWhitelistPackages;
+        final isLoading =
+            provider.appWhitelistState == MeasurementState.measuring;
+        final apps = provider.installedApps;
+        final normalizedQuery = _query.trim().toLowerCase();
+        final filteredApps = normalizedQuery.isEmpty
+            ? apps
+            : apps
+                .where((app) =>
+                    app.label.toLowerCase().contains(normalizedQuery) ||
+                    app.packageName.toLowerCase().contains(normalizedQuery))
+                .toList();
+        final visibleApps = filteredApps.take(30).toList();
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'App 联网白名单',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    _CapabilityBadge(label: status.running ? '已开启' : '未开启'),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '开启后仅放行勾选的 App，其它 App 会被本地 VPN 拦截。该模式不需要 Root，但会占用系统 VPN。',
+                  style: TextStyle(color: Colors.white70, height: 1.45),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  enabled: !status.running,
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: '搜索 App 或包名',
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (isLoading && apps.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (apps.isEmpty)
+                  const Text(
+                    '未读取到可启动 App',
+                    style: TextStyle(color: Colors.white54),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 320),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: visibleApps.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final app = visibleApps[index];
+                        return CheckboxListTile(
+                          value: selected.contains(app.packageName),
+                          onChanged: status.running
+                              ? null
+                              : (_) => provider
+                                  .toggleWhitelistPackage(app.packageName),
+                          title: Text(
+                            app.label.isEmpty ? app.packageName : app.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            app.packageName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          contentPadding: EdgeInsets.zero,
+                        );
+                      },
+                    ),
+                  ),
+                if (filteredApps.length > visibleApps.length) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '已显示前 ${visibleApps.length} 个匹配 App',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton(
+                      onPressed:
+                          isLoading || (!status.running && selected.isEmpty)
+                              ? null
+                              : status.running
+                                  ? provider.stopAppWhitelistVpn
+                                  : provider.startAppWhitelistVpn,
+                      child: Text(status.running ? '关闭白名单' : '开启白名单'),
+                    ),
+                    FilledButton.tonal(
+                      onPressed:
+                          isLoading ? null : provider.refreshAppWhitelistVpn,
+                      child: const Text('刷新列表'),
+                    ),
+                    TextButton(
+                      onPressed: isLoading ? null : provider.openVpnSettings,
+                      child: const Text('系统 VPN 设置'),
+                    ),
+                  ],
+                ),
+                if (!status.running && selected.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    '请先勾选至少一个允许联网的 App',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+                if (status.message.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    status.message,
+                    style: const TextStyle(
+                      color: Colors.lightBlueAccent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         );
       },

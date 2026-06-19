@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/network_provider.dart';
 import '../services/diagnosis_service.dart';
+import 'network_tuning_screen.dart';
 
 class DiagnosisScreen extends StatelessWidget {
   const DiagnosisScreen({super.key});
@@ -298,96 +299,21 @@ class _TipCard extends StatelessWidget {
 class _TemporaryPauseControls extends StatelessWidget {
   const _TemporaryPauseControls();
 
-  String _formatRemaining(Duration duration) {
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds.remainder(60);
-    if (minutes <= 0) return '$seconds 秒';
-    return '$minutes 分 ${seconds.toString().padLeft(2, '0')} 秒';
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Consumer<NetworkProvider>(
-      builder: (context, provider, _) {
-        final remaining = provider.backgroundRefreshPauseRemaining;
-        final isActive = provider.isBackgroundRefreshPaused;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _DurationButton(
-                  label: '15 分钟',
-                  onPressed: () => provider
-                      .startBackgroundRefreshPause(const Duration(minutes: 15)),
-                ),
-                _DurationButton(
-                  label: '30 分钟',
-                  onPressed: () => provider
-                      .startBackgroundRefreshPause(const Duration(minutes: 30)),
-                ),
-                _DurationButton(
-                  label: '60 分钟',
-                  onPressed: () => provider
-                      .startBackgroundRefreshPause(const Duration(minutes: 60)),
-                ),
-              ],
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const NetworkTuningScreen(),
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => provider.openManageApplicationsSettings(),
-                    icon: const Icon(Icons.settings_applications),
-                    label: const Text('打开应用设置'),
-                  ),
-                ),
-                if (isActive) ...[
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: provider.cancelBackgroundRefreshPause,
-                    child: const Text('取消'),
-                  ),
-                ],
-              ],
-            ),
-            if (isActive && remaining != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                '临时优化中，剩余 ${_formatRemaining(remaining)}',
-                style: const TextStyle(
-                  color: Colors.lightBlueAccent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _DurationButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onPressed;
-
-  const _DurationButton({required this.label, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return FilledButton.tonal(
-      onPressed: onPressed,
-      style: FilledButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          );
+        },
+        icon: const Icon(Icons.vpn_lock),
+        label: const Text('打开网络调优'),
       ),
-      child: Text(label),
     );
   }
 }

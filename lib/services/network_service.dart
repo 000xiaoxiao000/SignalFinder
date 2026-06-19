@@ -4,7 +4,9 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
+import '../models/app_whitelist_vpn_status.dart';
 import '../models/cell_signal.dart';
+import '../models/installed_app.dart';
 import '../models/network_tuning_status.dart';
 import '../models/network_status.dart';
 import '../models/root_command.dart';
@@ -70,6 +72,52 @@ class NetworkService {
     if (!Platform.isAndroid) return;
     await _mobileNetworkChannel
         .invokeMethod<void>('openManageApplicationsSettings');
+  }
+
+  Future<void> openVpnSettings() async {
+    if (!Platform.isAndroid) return;
+    await _mobileNetworkChannel.invokeMethod<void>('openVpnSettings');
+  }
+
+  Future<List<InstalledApp>> getInstalledApps() async {
+    if (!Platform.isAndroid) return const [];
+    final result = await _mobileNetworkChannel.invokeMethod<List<dynamic>>(
+      'getInstalledApps',
+    );
+    return result
+            ?.map((item) => InstalledApp.fromMap(item as Map<dynamic, dynamic>))
+            .where((app) => app.packageName.isNotEmpty)
+            .toList() ??
+        const [];
+  }
+
+  Future<AppWhitelistVpnStatus> getAppWhitelistVpnStatus() async {
+    if (!Platform.isAndroid) return AppWhitelistVpnStatus.empty();
+    final result = await _mobileNetworkChannel
+        .invokeMethod<Map<dynamic, dynamic>>('getAppWhitelistVpnStatus');
+    if (result == null) return AppWhitelistVpnStatus.empty();
+    return AppWhitelistVpnStatus.fromMap(result);
+  }
+
+  Future<AppWhitelistVpnStatus> startAppWhitelistVpn(
+    List<String> allowedPackages,
+  ) async {
+    if (!Platform.isAndroid) return AppWhitelistVpnStatus.empty();
+    final result =
+        await _mobileNetworkChannel.invokeMethod<Map<dynamic, dynamic>>(
+      'startAppWhitelistVpn',
+      {'allowedPackages': allowedPackages},
+    );
+    if (result == null) return AppWhitelistVpnStatus.empty();
+    return AppWhitelistVpnStatus.fromMap(result);
+  }
+
+  Future<AppWhitelistVpnStatus> stopAppWhitelistVpn() async {
+    if (!Platform.isAndroid) return AppWhitelistVpnStatus.empty();
+    final result = await _mobileNetworkChannel
+        .invokeMethod<Map<dynamic, dynamic>>('stopAppWhitelistVpn');
+    if (result == null) return AppWhitelistVpnStatus.empty();
+    return AppWhitelistVpnStatus.fromMap(result);
   }
 
   Future<List<CellSignal>> getCellSignals() async {
