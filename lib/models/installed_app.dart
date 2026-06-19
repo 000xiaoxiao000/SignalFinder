@@ -31,7 +31,7 @@ class InstalledApp {
 
   String get trafficLabel {
     final total = totalBytes;
-    if (total < 0) return '流量不可用';
+    if (total < 0) return '需授权';
     if (total < 1024) return '$total B';
     if (total < 1024 * 1024) {
       return '${(total / 1024).toStringAsFixed(1)} KB';

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/installed_app.dart';
 import '../providers/network_provider.dart';
 import 'advanced_mode_screen.dart';
 
@@ -269,8 +270,14 @@ class _AppWhitelistVpnScreen extends StatefulWidget {
   State<_AppWhitelistVpnScreen> createState() => _AppWhitelistVpnScreenState();
 }
 
+enum _AppSortMode { appName, packageName, traffic }
+
+String _appDisplayName(InstalledApp app) =>
+    app.label.isEmpty ? app.packageName : app.label;
+
 class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
   String _query = '';
+  _AppSortMode _sortMode = _AppSortMode.appName;
   final _searchController = TextEditingController();
 
   @override
@@ -296,13 +303,23 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
         final isLoading =
             provider.appWhitelistState == MeasurementState.measuring;
         final normalizedQuery = _query.trim().toLowerCase();
-        final apps = normalizedQuery.isEmpty
-            ? provider.installedApps
+        final apps = (normalizedQuery.isEmpty
+            ? provider.installedApps.toList()
             : provider.installedApps
                 .where((app) =>
                     app.label.toLowerCase().contains(normalizedQuery) ||
                     app.packageName.toLowerCase().contains(normalizedQuery))
-                .toList();
+                .toList())
+          ..sort((a, b) {
+            switch (_sortMode) {
+              case _AppSortMode.appName:
+                return _appDisplayName(a).compareTo(_appDisplayName(b));
+              case _AppSortMode.packageName:
+                return a.packageName.compareTo(b.packageName);
+              case _AppSortMode.traffic:
+                return b.totalBytes.compareTo(a.totalBytes);
+            }
+          });
         final selectedApps = provider.installedApps
             .where((app) => selected.contains(app.packageName))
             .toList();
@@ -341,6 +358,34 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
                     hintText: '搜索 App 或包名',
                     isDense: true,
                   ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: DropdownButtonFormField<_AppSortMode>(
+                  initialValue: _sortMode,
+                  decoration: const InputDecoration(
+                    labelText: '排序',
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: _AppSortMode.appName,
+                      child: Text('按 App 名'),
+                    ),
+                    DropdownMenuItem(
+                      value: _AppSortMode.packageName,
+                      child: Text('按包名'),
+                    ),
+                    DropdownMenuItem(
+                      value: _AppSortMode.traffic,
+                      child: Text('按流量从大到小'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _sortMode = value);
+                  },
                 ),
               ),
               if (!status.running)
@@ -420,6 +465,24 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
                             provider.toggleWhitelistPackage(app.packageName),
                       );
                     },
+                  ),
+                ),
+              if (!provider.hasUsageStatsPermission)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '流量统计需要允许“使用情况访问权限”，授权后刷新列表显示近 30 天流量。',
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: provider.openUsageAccessSettings,
+                        child: const Text('去授权'),
+                      ),
+                    ],
                   ),
                 ),
               if (status.message.isNotEmpty)

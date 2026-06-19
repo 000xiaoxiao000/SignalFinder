@@ -5,8 +5,10 @@ import android.content.Intent
 import android.content.ActivityNotFoundException
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.app.AppOpsManager
 import android.net.ConnectivityManager
-import android.net.TrafficStats
+import android.app.usage.NetworkStats
+import android.app.usage.NetworkStatsManager
 import android.net.VpnService
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -84,6 +86,11 @@ class MainActivity : FlutterActivity() {
                 "getCellSignals" -> getCellSignals(result)
                 "getNetworkTuningStatus" -> result.success(getNetworkTuningStatus())
                 "getInstalledApps" -> result.success(getInstalledApps())
+                "hasUsageStatsPermission" -> result.success(hasUsageStatsPermission())
+                "openUsageAccessSettings" -> {
+                    openUsageAccessSettings()
+                    result.success(null)
+                }
                 "getAppWhitelistVpnStatus" -> result.success(getAppWhitelistVpnStatus())
                 "startAppWhitelistVpn" -> {
                     val packages = call.argument<List<String>>("allowedPackages").orEmpty()
@@ -166,6 +173,12 @@ class MainActivity : FlutterActivity() {
 
     private fun getInstalledApps(): List<Map<String, Any?>> {
         val packageManager = packageManager
+        val hasUsageAccess = hasUsageStatsPermission()
+        val trafficByUid = if (hasUsageAccess) {
+            getTrafficByUid()
+        } else {
+            emptyMap()
+        }
         val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
@@ -187,8 +200,8 @@ class MainActivity : FlutterActivity() {
                         .ifBlank { app.loadLabel(packageManager).toString() },
                     "uid" to app.uid,
                     "systemApp" to ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0),
-                    "rxBytes" to TrafficStats.getUidRxBytes(app.uid),
-                    "txBytes" to TrafficStats.getUidTxBytes(app.uid),
+                    "rxBytes" to (trafficByUid[app.uid]?.first ?: if (hasUsageAccess) 0L else -1L),
+                    "txBytes" to (trafficByUid[app.uid]?.second ?: if (hasUsageAccess) 0L else -1L),
                 )
             }
             .sortedWith(
@@ -197,6 +210,63 @@ class MainActivity : FlutterActivity() {
             )
         Log.i(tag, "Loaded ${apps.size} launchable apps for whitelist")
         return apps
+    }
+
+    private fun hasUsageStatsPermission(): Boolean {
+        val appOpsManager = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOpsManager.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appOpsManager.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName,
+            )
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun getTrafficByUid(): Map<Int, Pair<Long, Long>> {
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - 30L * 24L * 60L * 60L * 1000L
+        val traffic = mutableMapOf<Int, Pair<Long, Long>>()
+        val manager = getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+
+        fun add(uid: Int, rxBytes: Long, txBytes: Long) {
+            val current = traffic[uid] ?: (0L to 0L)
+            traffic[uid] = (current.first + rxBytes) to (current.second + txBytes)
+        }
+
+        fun collect(networkType: Int, subscriberId: String?) {
+            runCatching {
+                val stats = manager.queryDetails(
+                    networkType,
+                    subscriberId,
+                    startTime,
+                    endTime,
+                )
+                stats.use { networkStats ->
+                    val bucket = NetworkStats.Bucket()
+                    while (networkStats.hasNextBucket()) {
+                        networkStats.getNextBucket(bucket)
+                        if (bucket.uid >= 0) {
+                            add(bucket.uid, bucket.rxBytes, bucket.txBytes)
+                        }
+                    }
+                }
+            }.onFailure {
+                Log.w(tag, "Failed to query network stats type=$networkType", it)
+            }
+        }
+
+        collect(ConnectivityManager.TYPE_WIFI, null)
+        collect(ConnectivityManager.TYPE_MOBILE, null)
+        return traffic
     }
 
     private fun getAppWhitelistVpnStatus(): Map<String, Any?> {
@@ -1066,6 +1136,20 @@ class MainActivity : FlutterActivity() {
 
     private fun openVpnSettings() {
         val intent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { startActivity(intent) }
+            .onFailure {
+                startActivity(
+                    Intent(Settings.ACTION_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            }
+    }
+
+    private fun openUsageAccessSettings() {
+        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { startActivity(intent) }

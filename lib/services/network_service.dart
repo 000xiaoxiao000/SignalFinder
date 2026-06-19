@@ -91,6 +91,19 @@ class NetworkService {
         const [];
   }
 
+  Future<bool> hasUsageStatsPermission() async {
+    if (!Platform.isAndroid) return false;
+    return await _mobileNetworkChannel.invokeMethod<bool>(
+          'hasUsageStatsPermission',
+        ) ??
+        false;
+  }
+
+  Future<void> openUsageAccessSettings() async {
+    if (!Platform.isAndroid) return;
+    await _mobileNetworkChannel.invokeMethod<void>('openUsageAccessSettings');
+  }
+
   Future<AppWhitelistVpnStatus> getAppWhitelistVpnStatus() async {
     if (!Platform.isAndroid) return AppWhitelistVpnStatus.empty();
     final result = await _mobileNetworkChannel
