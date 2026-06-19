@@ -1,5 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:saver_gallery/saver_gallery.dart';
+
+import '../services/app_log_service.dart';
 
 class ContactQrScreen extends StatefulWidget {
   const ContactQrScreen({super.key});
@@ -9,26 +16,18 @@ class ContactQrScreen extends StatefulWidget {
 }
 
 class _ContactQrScreenState extends State<ContactQrScreen> {
-  final List<_LogEntry> _logs = [];
   final DateFormat _timeFormat = DateFormat('HH:mm:ss.SSS');
+  final AppLogService _logs = AppLogService.instance;
+  final Set<String> _savingAssets = {};
 
   @override
   void initState() {
     super.initState();
-    _addLog('二维码页面已打开');
-  }
-
-  void _addLog(String message) {
-    setState(() {
-      _logs.insert(0, _LogEntry(DateTime.now(), message));
-      if (_logs.length > 100) {
-        _logs.removeLast();
-      }
-    });
+    _logs.info('日志页面已打开');
   }
 
   void _showQrPreview(_QrContact contact) {
-    _addLog('查看${contact.title}二维码');
+    _logs.info('查看${contact.title}二维码');
     showDialog<void>(
       context: context,
       builder: (context) {
@@ -60,12 +59,20 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
                       ?.copyWith(color: Colors.white70),
                 ),
                 const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('关闭'),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('关闭'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () => _saveQrToGallery(contact),
+                      icon: const Icon(Icons.download),
+                      label: const Text('保存到相册'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -75,20 +82,76 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
     );
   }
 
+  Future<void> _saveQrToGallery(_QrContact contact) async {
+    if (_savingAssets.contains(contact.assetPath)) return;
+    setState(() => _savingAssets.add(contact.assetPath));
+    _logs.info('开始保存${contact.title}二维码到相册');
+
+    try {
+      final hasPermission = await _requestGalleryPermission();
+      if (!hasPermission) {
+        _logs.warning('保存${contact.title}二维码失败：没有相册权限');
+        _showSnackBar('没有相册权限，无法保存二维码');
+        return;
+      }
+
+      final data = await rootBundle.load(contact.assetPath);
+      final bytes = data.buffer.asUint8List();
+      final result = await SaverGallery.saveImage(
+        bytes,
+        quality: 100,
+        fileName: contact.fileName,
+        androidRelativePath: 'Pictures/SignalFinder',
+        skipIfExists: false,
+      );
+
+      if (result.isSuccess) {
+        _logs.info('${contact.title}二维码已保存到相册');
+        _showSnackBar('${contact.title}已保存到相册');
+      } else {
+        final message = result.errorMessage ?? '未知错误';
+        _logs.error('保存${contact.title}二维码失败：$message');
+        _showSnackBar('保存失败：$message');
+      }
+    } catch (e, stack) {
+      _logs.error('保存${contact.title}二维码异常', e, stack);
+      _showSnackBar('保存失败：$e');
+    } finally {
+      if (mounted) {
+        setState(() => _savingAssets.remove(contact.assetPath));
+      }
+    }
+  }
+
+  Future<bool> _requestGalleryPermission() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return false;
+
+    if (Platform.isIOS) {
+      return Permission.photosAddOnly.request().isGranted;
+    }
+
+    await Permission.storage.request();
+    return true;
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   void _showLogs() {
-    _addLog('打开运行日志');
+    _logs.info('打开运行日志');
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF1F1F24),
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            void clearLogs() {
-              setState(() => _logs.clear());
-              setSheetState(() {});
-            }
-
+        return AnimatedBuilder(
+          animation: _logs,
+          builder: (context, _) {
+            final entries = _logs.entries;
             return SafeArea(
               child: SizedBox(
                 height: MediaQuery.sizeOf(context).height * 0.72,
@@ -108,7 +171,7 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
                           ),
                           const Spacer(),
                           TextButton(
-                            onPressed: clearLogs,
+                            onPressed: _logs.clear,
                             child: const Text('清空'),
                           ),
                           IconButton(
@@ -125,7 +188,7 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
                             color: Colors.black26,
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: _logs.isEmpty
+                          child: entries.isEmpty
                               ? Center(
                                   child: Text(
                                     '暂无日志',
@@ -137,21 +200,13 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
                                 )
                               : ListView.separated(
                                   padding: const EdgeInsets.all(12),
-                                  reverse: true,
-                                  itemCount: _logs.length,
+                                  itemCount: entries.length,
                                   separatorBuilder: (_, __) =>
                                       const SizedBox(height: 8),
                                   itemBuilder: (context, index) {
-                                    final entry = _logs[index];
-                                    return Text(
-                                      '[${_timeFormat.format(entry.time)}] ${entry.message}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: Colors.white70,
-                                            fontFamily: 'monospace',
-                                          ),
+                                    return _LogLine(
+                                      entry: entries[index],
+                                      timeFormat: _timeFormat,
                                     );
                                   },
                                 ),
@@ -173,7 +228,7 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
     return CustomScrollView(
       slivers: [
         SliverAppBar.large(
-          title: const Text('二维码'),
+          title: const Text('日志'),
           actions: [
             IconButton(
               onPressed: _showLogs,
@@ -199,7 +254,9 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
               final contact = _contacts[index];
               return _QrCard(
                 contact: contact,
+                isSaving: _savingAssets.contains(contact.assetPath),
                 onTap: () => _showQrPreview(contact),
+                onSave: () => _saveQrToGallery(contact),
               );
             },
           ),
@@ -211,53 +268,58 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
 
 class _QrCard extends StatelessWidget {
   final _QrContact contact;
+  final bool isSaving;
   final VoidCallback onTap;
+  final VoidCallback onSave;
 
   const _QrCard({
     required this.contact,
+    required this.isSaving,
     required this.onTap,
+    required this.onSave,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(contact.icon, color: contact.color),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      contact.title,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(contact.icon, color: contact.color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    contact.title,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                contact.description,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: Colors.white60),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 360),
-                  child: AspectRatio(
-                    aspectRatio: 1,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              contact.description,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: Colors.white60),
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 240),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: InkWell(
+                    onTap: onTap,
+                    borderRadius: BorderRadius.circular(8),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -277,10 +339,59 @@ class _QrCard extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isSaving ? null : onSave,
+                icon: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download),
+                label: Text(isSaving ? '保存中' : '保存到相册'),
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _LogLine extends StatelessWidget {
+  final AppLogEntry entry;
+  final DateFormat timeFormat;
+
+  const _LogLine({
+    required this.entry,
+    required this.timeFormat,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (entry.level) {
+      AppLogLevel.error => const Color(0xFFFF8A80),
+      AppLogLevel.warning => const Color(0xFFFFD180),
+      AppLogLevel.info => Colors.white70,
+    };
+    final level = switch (entry.level) {
+      AppLogLevel.error => 'ERROR',
+      AppLogLevel.warning => 'WARN ',
+      AppLogLevel.info => 'INFO ',
+    };
+    final error = entry.error == null ? '' : '\n${entry.error}';
+    final stack = entry.stackTrace == null ? '' : '\n${entry.stackTrace}';
+
+    return Text(
+      '[${timeFormat.format(entry.time)}] $level ${entry.message}$error$stack',
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: color,
+            fontFamily: 'monospace',
+          ),
     );
   }
 }
@@ -289,6 +400,7 @@ class _QrContact {
   final String title;
   final String description;
   final String assetPath;
+  final String fileName;
   final IconData icon;
   final Color color;
 
@@ -296,16 +408,10 @@ class _QrContact {
     required this.title,
     required this.description,
     required this.assetPath,
+    required this.fileName,
     required this.icon,
     required this.color,
   });
-}
-
-class _LogEntry {
-  final DateTime time;
-  final String message;
-
-  const _LogEntry(this.time, this.message);
 }
 
 const _contacts = [
@@ -313,6 +419,7 @@ const _contacts = [
     title: '个人微信',
     description: '扫码添加个人微信。',
     assetPath: 'assets/qr/personal_wechat.png',
+    fileName: 'signal_finder_personal_wechat.png',
     icon: Icons.person_add_alt_1,
     color: Color(0xFF00C853),
   ),
@@ -320,6 +427,7 @@ const _contacts = [
     title: '公众号',
     description: '扫码关注公众号。',
     assetPath: 'assets/qr/public_account.jpg',
+    fileName: 'signal_finder_public_account.jpg',
     icon: Icons.campaign_outlined,
     color: Color(0xFF40C4FF),
   ),
@@ -327,6 +435,7 @@ const _contacts = [
     title: '视频号',
     description: '扫码关注视频号。',
     assetPath: 'assets/qr/video_channel.jpg',
+    fileName: 'signal_finder_video_channel.jpg',
     icon: Icons.smart_display_outlined,
     color: Color(0xFFFFAB40),
   ),

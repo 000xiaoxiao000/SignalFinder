@@ -21,6 +21,7 @@ dependencies:
   fl_chart: ^0.67.0
   url_launcher: ^6.2.4
   permission_handler: ^11.3.0
+  saver_gallery: 4.1.2
 
 dev_dependencies:
   flutter_test:

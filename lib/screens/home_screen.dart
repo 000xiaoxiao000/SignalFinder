@@ -61,7 +61,8 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.dns), label: 'DNS 优选'),
           NavigationDestination(
               icon: Icon(Icons.medical_services_outlined), label: '网络诊断'),
-          NavigationDestination(icon: Icon(Icons.qr_code_2), label: '二维码'),
+          NavigationDestination(
+              icon: Icon(Icons.article_outlined), label: '日志'),
         ],
       ),
     );
