@@ -10,6 +10,7 @@ import '../models/dns_result.dart';
 import '../services/network_service.dart';
 import '../services/dns_service.dart';
 import '../services/diagnosis_service.dart';
+import '../services/app_log_service.dart';
 
 enum MeasurementState { idle, measuring, done, error }
 
@@ -17,6 +18,7 @@ class NetworkProvider extends ChangeNotifier {
   final _networkService = NetworkService();
   final _dnsService = DnsService();
   final _diagnosisService = DiagnosisService();
+  final _logs = AppLogService.instance;
 
   NetworkStatus _currentStatus = NetworkStatus.empty();
   List<NetworkStatus> _history = [];
@@ -123,9 +125,10 @@ class NetworkProvider extends ChangeNotifier {
       _currentStatus = status;
       _addToHistory(status);
       _networkState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _networkState = MeasurementState.error;
+      _logs.error('快速网络检测失败', e, stack);
     }
     notifyListeners();
   }
@@ -140,9 +143,10 @@ class NetworkProvider extends ChangeNotifier {
       _currentStatus = status;
       _addToHistory(status);
       _networkState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _networkState = MeasurementState.error;
+      _logs.error('完整网络检测失败', e, stack);
     }
     notifyListeners();
   }
@@ -167,10 +171,11 @@ class NetworkProvider extends ChangeNotifier {
         });
       _cellSignalRefreshMessage = _buildCellSignalRefreshMessage(_cellSignals);
       _cellSignalState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _cellSignalRefreshMessage = '刷新失败：$_errorMessage';
       _cellSignalState = MeasurementState.error;
+      _logs.error('刷新小区信号失败', e, stack);
     }
     _cellSignalRefreshStartedAt = null;
     _cellSignalRefreshTicker?.cancel();
@@ -213,9 +218,10 @@ class NetworkProvider extends ChangeNotifier {
     try {
       _tuningStatus = await _networkService.getNetworkTuningStatus();
       _tuningState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _tuningState = MeasurementState.error;
+      _logs.error('读取网络调优状态失败', e, stack);
     }
     notifyListeners();
   }
@@ -233,9 +239,10 @@ class NetworkProvider extends ChangeNotifier {
       _installedApps = apps;
       _appWhitelistVpnStatus = status;
       _appWhitelistState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _appWhitelistState = MeasurementState.error;
+      _logs.error('刷新应用白名单 VPN 状态失败', e, stack);
     }
     notifyListeners();
   }
@@ -285,9 +292,10 @@ class NetworkProvider extends ChangeNotifier {
         _appWhitelistVpnStatus.allowedPackages,
       );
       _appWhitelistState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _appWhitelistState = MeasurementState.error;
+      _logs.error('启动应用白名单 VPN 失败', e, stack);
     }
     notifyListeners();
   }
@@ -306,9 +314,10 @@ class NetworkProvider extends ChangeNotifier {
         message: status.message,
       );
       _appWhitelistState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _appWhitelistState = MeasurementState.error;
+      _logs.error('停止应用白名单 VPN 失败', e, stack);
     }
     notifyListeners();
   }
@@ -321,9 +330,10 @@ class NetworkProvider extends ChangeNotifier {
     try {
       _rootStatus = await _networkService.checkRootStatus();
       _rootState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _rootState = MeasurementState.error;
+      _logs.error('检测 Root 状态失败', e, stack);
     }
     notifyListeners();
   }
@@ -336,9 +346,10 @@ class NetworkProvider extends ChangeNotifier {
     try {
       _lastRootCommandResult = await _networkService.runRootCommand(commandId);
       _rootState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _rootState = MeasurementState.error;
+      _logs.error('执行 Root 命令失败', e, stack);
     }
     notifyListeners();
   }
@@ -360,9 +371,10 @@ class NetworkProvider extends ChangeNotifier {
       );
       _dnsServers = results;
       _dnsState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _dnsState = MeasurementState.error;
+      _logs.error('DNS 优选测试失败', e, stack);
     }
     notifyListeners();
   }
@@ -377,9 +389,10 @@ class NetworkProvider extends ChangeNotifier {
       await runFullMeasurement();
       _diagnosisResult = _diagnosisService.diagnose(_currentStatus);
       _diagnosisState = MeasurementState.done;
-    } catch (e) {
+    } catch (e, stack) {
       _errorMessage = e.toString();
       _diagnosisState = MeasurementState.error;
+      _logs.error('网络诊断失败', e, stack);
     }
     notifyListeners();
   }
