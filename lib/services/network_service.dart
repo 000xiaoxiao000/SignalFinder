@@ -10,6 +10,7 @@ import '../models/installed_app.dart';
 import '../models/network_tuning_status.dart';
 import '../models/network_status.dart';
 import '../models/root_command.dart';
+import 'app_log_service.dart';
 
 class NetworkService {
   static const MethodChannel _mobileNetworkChannel =
@@ -19,9 +20,11 @@ class NetworkService {
       'https://speed.cloudflare.com/__down?bytes=1000000';
   static const int _pingCount = 5;
   static const int _pingTimeoutMs = 3000;
+  final _logs = AppLogService.instance;
 
   Future<NetworkType> getNetworkType() async {
     final result = await Connectivity().checkConnectivity();
+    _logs.info('当前连接类型：$result');
     if (result == ConnectivityResult.wifi) return NetworkType.wifi;
     if (result == ConnectivityResult.mobile) {
       return _getMobileNetworkType();
@@ -47,35 +50,40 @@ class NetworkService {
         case '2G':
           return NetworkType.mobile2G;
       }
-    } catch (_) {
-      // Fall back to generic mobile when Android cannot expose radio details.
+    } catch (e, stack) {
+      _logs.warning('读取移动网络制式失败，降级为 mobile', e, stack);
     }
     return NetworkType.mobile;
   }
 
   Future<void> openMobileNetworkSettings() async {
     if (!Platform.isAndroid) return;
+    _logs.info('打开移动网络设置');
     await _mobileNetworkChannel.invokeMethod<void>('openMobileNetworkSettings');
   }
 
   Future<void> openWifiSettings() async {
     if (!Platform.isAndroid) return;
+    _logs.info('打开 WiFi 设置');
     await _mobileNetworkChannel.invokeMethod<void>('openWifiSettings');
   }
 
   Future<void> openDataSaverSettings() async {
     if (!Platform.isAndroid) return;
+    _logs.info('打开省流量设置');
     await _mobileNetworkChannel.invokeMethod<void>('openDataSaverSettings');
   }
 
   Future<void> openManageApplicationsSettings() async {
     if (!Platform.isAndroid) return;
+    _logs.info('打开应用管理设置');
     await _mobileNetworkChannel
         .invokeMethod<void>('openManageApplicationsSettings');
   }
 
   Future<void> openVpnSettings() async {
     if (!Platform.isAndroid) return;
+    _logs.info('打开 VPN 设置');
     await _mobileNetworkChannel.invokeMethod<void>('openVpnSettings');
   }
 
@@ -84,11 +92,13 @@ class NetworkService {
     final result = await _mobileNetworkChannel.invokeMethod<List<dynamic>>(
       'getInstalledApps',
     );
-    return result
+    final apps = result
             ?.map((item) => InstalledApp.fromMap(item as Map<dynamic, dynamic>))
             .where((app) => app.packageName.isNotEmpty)
             .toList() ??
-        const [];
+        const <InstalledApp>[];
+    _logs.info('读取已安装应用完成：${apps.length} 个');
+    return apps;
   }
 
   Future<bool> hasUsageStatsPermission() async {
@@ -101,6 +111,7 @@ class NetworkService {
 
   Future<void> openUsageAccessSettings() async {
     if (!Platform.isAndroid) return;
+    _logs.info('打开使用情况访问权限设置');
     await _mobileNetworkChannel.invokeMethod<void>('openUsageAccessSettings');
   }
 
@@ -150,7 +161,8 @@ class NetworkService {
               ?.map((item) => CellSignal.fromMap(item as Map<dynamic, dynamic>))
               .toList() ??
           const [];
-    } on PlatformException catch (e) {
+    } on PlatformException catch (e, stack) {
+      _logs.error('系统读取小区信息失败', e, stack);
       throw Exception(e.message ?? '系统读取小区信息失败');
     }
   }
@@ -162,7 +174,8 @@ class NetworkService {
           .invokeMethod<Map<dynamic, dynamic>>('getNetworkTuningStatus');
       if (result == null) return NetworkTuningStatus.empty();
       return NetworkTuningStatus.fromMap(result);
-    } catch (_) {
+    } catch (e, stack) {
+      _logs.error('读取网络调优状态失败', e, stack);
       return NetworkTuningStatus.empty();
     }
   }
@@ -175,7 +188,8 @@ class NetworkService {
             {'enabled': enabled},
           ) ??
           false;
-    } catch (_) {
+    } catch (e, stack) {
+      _logs.error('设置高性能 WiFi 锁失败', e, stack);
       return false;
     }
   }
@@ -187,7 +201,8 @@ class NetworkService {
           .invokeMethod<Map<dynamic, dynamic>>('checkRootStatus');
       if (result == null) return RootStatus.unknown();
       return RootStatus.fromMap(result);
-    } catch (_) {
+    } catch (e, stack) {
+      _logs.error('检测 Root 状态失败', e, stack);
       return RootStatus.unknown();
     }
   }
@@ -202,7 +217,8 @@ class NetworkService {
       );
       if (result == null) return RootCommandResult.empty();
       return RootCommandResult.fromMap(result);
-    } catch (_) {
+    } catch (e, stack) {
+      _logs.error('执行 Root 命令失败：$commandId', e, stack);
       return RootCommandResult.empty();
     }
   }
@@ -220,8 +236,8 @@ class NetworkService {
         final elapsed = DateTime.now().difference(start).inMilliseconds;
         socket.destroy();
         latencies.add(elapsed);
-      } catch (_) {
-        // packet lost
+      } catch (e, stack) {
+        _logs.warning('Ping 第 ${i + 1} 次失败', e, stack);
       }
       await Future.delayed(const Duration(milliseconds: 200));
     }
@@ -245,8 +261,8 @@ class NetworkService {
         );
         socket.destroy();
         received++;
-      } catch (_) {
-        // lost
+      } catch (e, stack) {
+        _logs.warning('丢包测试第 ${i + 1} 次失败', e, stack);
       }
       await Future.delayed(const Duration(milliseconds: 100));
     }
@@ -265,8 +281,8 @@ class NetworkService {
         final bytes = response.bodyBytes.length;
         return (bytes * 8 / elapsed / 1000); // Mbps
       }
-    } catch (_) {
-      // fallback: small HTTP request
+    } catch (e, stack) {
+      _logs.warning('Cloudflare 下载测速失败，尝试备用测速', e, stack);
       try {
         final start = DateTime.now();
         await http
@@ -274,7 +290,9 @@ class NetworkService {
             .timeout(const Duration(seconds: 5));
         final elapsed = DateTime.now().difference(start).inMilliseconds;
         if (elapsed > 0) return 50000 / elapsed; // rough estimate
-      } catch (_) {}
+      } catch (e, stack) {
+        _logs.error('备用下载测速失败', e, stack);
+      }
     }
     return 0.0;
   }
@@ -289,15 +307,19 @@ class NetworkService {
   }
 
   Future<NetworkStatus> fullMeasurement() async {
+    _logs.info('开始完整网络检测');
     final type = await getNetworkType();
-    if (type == NetworkType.none) return NetworkStatus.empty();
+    if (type == NetworkType.none) {
+      _logs.warning('完整网络检测结束：无网络连接');
+      return NetworkStatus.empty();
+    }
 
     final pingMs = await measurePing();
     final packetLoss = await measurePacketLoss();
     final signal = inferSignalStrength(pingMs, packetLoss);
     final downloadSpeed = await measureDownloadSpeed();
 
-    return NetworkStatus(
+    final status = NetworkStatus(
       timestamp: DateTime.now(),
       type: type,
       signal: signal,
@@ -307,18 +329,26 @@ class NetworkService {
       dnsLatencyMs: '--',
       isConnected: true,
     );
+    _logs.info(
+      '完整网络检测完成：ping=${status.pingMs}ms, 丢包=${status.packetLossPercent.toStringAsFixed(0)}%, 下载=${status.downloadSpeedMbps.toStringAsFixed(1)}Mbps',
+    );
+    return status;
   }
 
   /// Quick measurement — only ping, skip speed test for real-time updates
   Future<NetworkStatus> quickMeasurement() async {
+    _logs.info('开始快速网络检测');
     final type = await getNetworkType();
-    if (type == NetworkType.none) return NetworkStatus.empty();
+    if (type == NetworkType.none) {
+      _logs.warning('快速网络检测结束：无网络连接');
+      return NetworkStatus.empty();
+    }
 
     final pingMs = await measurePing();
     final packetLoss = await measurePacketLoss();
     final signal = inferSignalStrength(pingMs, packetLoss);
 
-    return NetworkStatus(
+    final status = NetworkStatus(
       timestamp: DateTime.now(),
       type: type,
       signal: signal,
@@ -328,5 +358,9 @@ class NetworkService {
       dnsLatencyMs: '--',
       isConnected: true,
     );
+    _logs.info(
+      '快速网络检测完成：ping=${status.pingMs}ms, 丢包=${status.packetLossPercent.toStringAsFixed(0)}%',
+    );
+    return status;
   }
 }
