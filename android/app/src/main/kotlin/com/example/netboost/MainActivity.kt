@@ -37,6 +37,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private val tag = "NetBoostMainActivity"
@@ -46,6 +47,8 @@ class MainActivity : FlutterActivity() {
     private val VPN_REQUEST_CODE = 4101
     private var pendingVpnPackages: List<String> = emptyList()
     private var pendingVpnResult: MethodChannel.Result? = null
+    private val backgroundExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     private data class TowerPoint(
         val lat: Double,
@@ -85,7 +88,7 @@ class MainActivity : FlutterActivity() {
                 "getMobileNetworkGeneration" -> result.success(getMobileNetworkGeneration())
                 "getCellSignals" -> getCellSignals(result)
                 "getNetworkTuningStatus" -> result.success(getNetworkTuningStatus())
-                "getInstalledApps" -> result.success(getInstalledApps())
+                "getInstalledApps" -> runInBackground(result) { getInstalledApps() }
                 "hasUsageStatsPermission" -> result.success(hasUsageStatsPermission())
                 "openUsageAccessSettings" -> {
                     openUsageAccessSettings()
@@ -104,10 +107,10 @@ class MainActivity : FlutterActivity() {
                     openVpnSettings()
                     result.success(null)
                 }
-                "checkRootStatus" -> result.success(checkRootStatus())
+                "checkRootStatus" -> runInBackground(result) { checkRootStatus() }
                 "runRootCommand" -> {
                     val commandId = call.argument<String>("commandId").orEmpty()
-                    result.success(runRootCommand(commandId))
+                    runInBackground(result) { runRootCommand(commandId) }
                 }
                 "setHighPerfWifiLock" -> {
                     val enabled = call.argument<Boolean>("enabled") ?: false
@@ -131,6 +134,33 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    override fun onDestroy() {
+        backgroundExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
+    private fun <T> runInBackground(
+        result: MethodChannel.Result,
+        task: () -> T,
+    ) {
+        backgroundExecutor.execute {
+            runCatching { task() }
+                .onSuccess { value ->
+                    mainHandler.post { result.success(value) }
+                }
+                .onFailure { error ->
+                    Log.e(tag, "Background method failed", error)
+                    mainHandler.post {
+                        result.error(
+                            "BACKGROUND_METHOD_FAILED",
+                            error.message ?: error.javaClass.simpleName,
+                            null,
+                        )
+                    }
+                }
         }
     }
 

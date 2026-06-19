@@ -19,6 +19,7 @@ class NetworkService {
   static const String _speedTestUrl =
       'https://speed.cloudflare.com/__down?bytes=1000000';
   static const int _pingCount = 5;
+  static const int _quickPingCount = 3;
   static const int _pingTimeoutMs = 3000;
   final _logs = AppLogService.instance;
 
@@ -223,9 +224,12 @@ class NetworkService {
     }
   }
 
-  Future<int> measurePing() async {
+  Future<({int pingMs, double packetLossPercent})> _measureTcpConnectivity({
+    required int count,
+    required Duration delay,
+  }) async {
     final latencies = <int>[];
-    for (int i = 0; i < _pingCount; i++) {
+    for (int i = 0; i < count; i++) {
       try {
         final start = DateTime.now();
         final socket = await Socket.connect(
@@ -237,37 +241,38 @@ class NetworkService {
         socket.destroy();
         latencies.add(elapsed);
       } catch (e, stack) {
-        _logs.warning('Ping 第 ${i + 1} 次失败', e, stack);
+        _logs.warning('TCP 探测第 ${i + 1} 次失败', e, stack);
       }
-      await Future.delayed(const Duration(milliseconds: 200));
+      if (i < count - 1) {
+        await Future.delayed(delay);
+      }
     }
-    if (latencies.isEmpty) return -1;
-    latencies.sort();
-    // trim outliers: remove highest value
-    if (latencies.length > 2) latencies.removeLast();
-    return (latencies.reduce((a, b) => a + b) / latencies.length).round();
+    final packetLoss = ((count - latencies.length) / count * 100).toDouble();
+    if (latencies.isEmpty) {
+      return (pingMs: -1, packetLossPercent: packetLoss);
+    }
+    final stableLatencies = latencies.toList()..sort();
+    if (stableLatencies.length > 2) stableLatencies.removeLast();
+    final pingMs =
+        (stableLatencies.reduce((a, b) => a + b) / stableLatencies.length)
+            .round();
+    return (pingMs: pingMs, packetLossPercent: packetLoss);
+  }
+
+  Future<int> measurePing() async {
+    final result = await _measureTcpConnectivity(
+      count: _pingCount,
+      delay: const Duration(milliseconds: 200),
+    );
+    return result.pingMs;
   }
 
   Future<double> measurePacketLoss() async {
-    int sent = 0;
-    int received = 0;
-    for (int i = 0; i < _pingCount; i++) {
-      sent++;
-      try {
-        final socket = await Socket.connect(
-          _pingHost,
-          80,
-          timeout: const Duration(milliseconds: _pingTimeoutMs),
-        );
-        socket.destroy();
-        received++;
-      } catch (e, stack) {
-        _logs.warning('丢包测试第 ${i + 1} 次失败', e, stack);
-      }
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-    if (sent == 0) return 100.0;
-    return ((sent - received) / sent * 100).toDouble();
+    final result = await _measureTcpConnectivity(
+      count: _pingCount,
+      delay: const Duration(milliseconds: 100),
+    );
+    return result.packetLossPercent;
   }
 
   Future<double> measureDownloadSpeed() async {
@@ -314,8 +319,12 @@ class NetworkService {
       return NetworkStatus.empty();
     }
 
-    final pingMs = await measurePing();
-    final packetLoss = await measurePacketLoss();
+    final connectivity = await _measureTcpConnectivity(
+      count: _pingCount,
+      delay: const Duration(milliseconds: 200),
+    );
+    final pingMs = connectivity.pingMs;
+    final packetLoss = connectivity.packetLossPercent;
     final signal = inferSignalStrength(pingMs, packetLoss);
     final downloadSpeed = await measureDownloadSpeed();
 
@@ -344,8 +353,12 @@ class NetworkService {
       return NetworkStatus.empty();
     }
 
-    final pingMs = await measurePing();
-    final packetLoss = await measurePacketLoss();
+    final connectivity = await _measureTcpConnectivity(
+      count: _quickPingCount,
+      delay: const Duration(milliseconds: 150),
+    );
+    final pingMs = connectivity.pingMs;
+    final packetLoss = connectivity.packetLossPercent;
     final signal = inferSignalStrength(pingMs, packetLoss);
 
     final status = NetworkStatus(

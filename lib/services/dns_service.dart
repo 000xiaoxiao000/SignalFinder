@@ -7,6 +7,7 @@ class DnsService {
   static const String _testDomain = 'baidu.com';
   static const int _dnsPort = 53;
   static const int _timeoutMs = 3000;
+  static const int _maxConcurrentTests = 4;
   final _logs = AppLogService.instance;
 
   /// DNS query packet for A record of _testDomain
@@ -96,14 +97,26 @@ class DnsService {
     List<DnsServer> servers, {
     void Function(int index, DnsServer server)? onProgress,
   }) async {
-    for (int i = 0; i < servers.length; i++) {
-      final server = servers[i];
-      final latency = await testDnsLatency(server.address);
-      server.latencyMs = latency;
-      server.isTested = true;
-      server.isReachable = latency >= 0;
-      onProgress?.call(i, server);
+    var nextIndex = 0;
+    var completed = 0;
+
+    Future<void> worker() async {
+      while (nextIndex < servers.length) {
+        final index = nextIndex++;
+        final server = servers[index];
+        final latency = await testDnsLatency(server.address);
+        server.latencyMs = latency;
+        server.isTested = true;
+        server.isReachable = latency >= 0;
+        onProgress?.call(completed++, server);
+      }
     }
+
+    final workerCount = servers.length < _maxConcurrentTests
+        ? servers.length
+        : _maxConcurrentTests;
+    await Future.wait(List.generate(workerCount, (_) => worker()));
+
     final tested = servers.where((s) => s.isReachable).toList();
     tested.sort((a, b) => a.latencyMs.compareTo(b.latencyMs));
     final unreachable = servers.where((s) => !s.isReachable).toList();

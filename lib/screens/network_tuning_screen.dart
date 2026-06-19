@@ -296,44 +296,16 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<NetworkProvider>(
-      builder: (context, provider, _) {
-        final status = provider.appWhitelistVpnStatus;
-        final selected = provider.selectedWhitelistPackages;
-        final isLoading =
-            provider.appWhitelistState == MeasurementState.measuring;
-        final normalizedQuery = _query.trim().toLowerCase();
-        final apps = (normalizedQuery.isEmpty
-            ? provider.installedApps.toList()
-            : provider.installedApps
-                .where((app) =>
-                    app.label.toLowerCase().contains(normalizedQuery) ||
-                    app.packageName.toLowerCase().contains(normalizedQuery))
-                .toList())
-          ..sort((a, b) {
-            switch (_sortMode) {
-              case _AppSortMode.appName:
-                return _appDisplayName(a).compareTo(_appDisplayName(b));
-              case _AppSortMode.packageName:
-                return a.packageName.compareTo(b.packageName);
-              case _AppSortMode.traffic:
-                return b.totalBytes.compareTo(a.totalBytes);
-            }
-          });
-        final selectedApps = provider.installedApps
-            .where((app) => selected.contains(app.packageName))
-            .toList();
+    return Selector<NetworkProvider, bool>(
+      selector: (_, provider) => provider.appWhitelistVpnStatus.running,
+      builder: (context, isRunning, _) {
+        final provider = context.read<NetworkProvider>();
+        final apps = _filteredApps(context);
 
         return Scaffold(
           appBar: AppBar(
             title: const Text('App 联网白名单'),
-            actions: [
-              IconButton(
-                onPressed: isLoading ? null : provider.refreshAppWhitelistVpn,
-                icon: const Icon(Icons.refresh),
-                tooltip: '刷新列表',
-              ),
-            ],
+            actions: const [_AppWhitelistRefreshButton()],
           ),
           body: Column(
             children: [
@@ -341,11 +313,11 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                 child: TextField(
                   controller: _searchController,
-                  enabled: !status.running,
+                  enabled: !isRunning,
                   onChanged: (value) => setState(() => _query = value),
                   decoration: InputDecoration(
                     prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _query.isEmpty || status.running
+                    suffixIcon: _query.isEmpty || isRunning
                         ? null
                         : IconButton(
                             onPressed: () {
@@ -388,195 +360,346 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
                   },
                 ),
               ),
-              if (!status.running)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        '已选 ${selected.length} 个',
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: apps.isEmpty
-                            ? null
-                            : () => provider.selectWhitelistPackages(
-                                  apps.map((app) => app.packageName),
-                                ),
-                        child: const Text('全选当前'),
-                      ),
-                      TextButton(
-                        onPressed: apps.isEmpty
-                            ? null
-                            : () => provider.unselectWhitelistPackages(
-                                  apps.map((app) => app.packageName),
-                                ),
-                        child: const Text('取消当前'),
-                      ),
-                      TextButton(
-                        onPressed: selected.isEmpty
-                            ? null
-                            : () => provider.unselectWhitelistPackages(
-                                  selected,
-                                ),
-                        child: const Text('取消已选'),
-                      ),
-                    ],
-                  ),
-                ),
-              if (!status.running && selectedApps.isNotEmpty)
-                SizedBox(
-                  height: 120,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: selectedApps.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (context, index) {
-                      final app = selectedApps[index];
-                      return InputChip(
-                        label: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 220),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                app.label.isEmpty ? app.packageName : app.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              Text(
-                                app.packageName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ),
-                        onDeleted: () =>
-                            provider.toggleWhitelistPackage(app.packageName),
-                      );
-                    },
-                  ),
-                ),
-              if (!provider.hasUsageStatsPermission)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          '流量统计需要允许“使用情况访问权限”，授权后刷新列表显示近 30 天流量。',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: provider.openUsageAccessSettings,
-                        child: const Text('去授权'),
-                      ),
-                    ],
-                  ),
-                ),
-              if (status.message.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      status.message,
-                      style: const TextStyle(
-                        color: Colors.lightBlueAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
+              if (!isRunning) _WhitelistBulkActions(apps: apps),
+              if (!isRunning) const _SelectedAppsStrip(),
+              const _UsagePermissionPrompt(),
+              const _WhitelistStatusMessage(),
               Expanded(
-                child: isLoading && provider.installedApps.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : apps.isEmpty
-                        ? const Center(
-                            child: Text(
-                              '未读取到可启动 App',
-                              style: TextStyle(color: Colors.white54),
-                            ),
-                          )
-                        : ListView.separated(
-                            itemCount: apps.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final app = apps[index];
-                              return CheckboxListTile(
-                                value: selected.contains(app.packageName),
-                                onChanged: status.running
-                                    ? null
-                                    : (_) => provider.toggleWhitelistPackage(
-                                          app.packageName,
-                                        ),
-                                title: Text(
-                                  app.label.isEmpty
-                                      ? app.packageName
-                                      : app.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Text(
-                                  '${app.packageName} · ${app.trafficLabel}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                secondary: Text(
-                                  app.trafficLabel,
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                controlAffinity:
-                                    ListTileControlAffinity.leading,
-                              );
-                            },
-                          ),
+                child: _WhitelistAppsList(
+                  apps: apps,
+                  onTogglePackage: provider.toggleWhitelistPackage,
+                ),
               ),
             ],
           ),
-          bottomNavigationBar: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: FilledButton(
-                      onPressed:
-                          isLoading || (!status.running && selected.isEmpty)
-                              ? null
-                              : status.running
-                                  ? provider.stopAppWhitelistVpn
-                                  : provider.startAppWhitelistVpn,
-                      child: Text(status.running ? '关闭白名单' : '开启白名单'),
+          bottomNavigationBar: const _WhitelistBottomBar(),
+        );
+      },
+    );
+  }
+
+  List<InstalledApp> _filteredApps(BuildContext context) {
+    final provider = context.watch<NetworkProvider>();
+    final normalizedQuery = _query.trim().toLowerCase();
+    final apps = (normalizedQuery.isEmpty
+        ? provider.installedApps.toList()
+        : provider.installedApps
+            .where((app) =>
+                app.label.toLowerCase().contains(normalizedQuery) ||
+                app.packageName.toLowerCase().contains(normalizedQuery))
+            .toList())
+      ..sort((a, b) {
+        switch (_sortMode) {
+          case _AppSortMode.appName:
+            return _appDisplayName(a).compareTo(_appDisplayName(b));
+          case _AppSortMode.packageName:
+            return a.packageName.compareTo(b.packageName);
+          case _AppSortMode.traffic:
+            return b.totalBytes.compareTo(a.totalBytes);
+        }
+      });
+    return apps;
+  }
+}
+
+class _AppWhitelistRefreshButton extends StatelessWidget {
+  const _AppWhitelistRefreshButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoading = context.select<NetworkProvider, bool>(
+      (provider) => provider.appWhitelistState == MeasurementState.measuring,
+    );
+    final provider = context.read<NetworkProvider>();
+    return IconButton(
+      onPressed: isLoading
+          ? null
+          : () => provider.refreshAppWhitelistVpn(forceAppsRefresh: true),
+      icon: const Icon(Icons.refresh),
+      tooltip: '刷新列表',
+    );
+  }
+}
+
+class _WhitelistBulkActions extends StatelessWidget {
+  final List<InstalledApp> apps;
+
+  const _WhitelistBulkActions({required this.apps});
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = context.select<NetworkProvider, Set<String>>(
+      (provider) => provider.selectedWhitelistPackages,
+    );
+    final provider = context.read<NetworkProvider>();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            '已选 ${selected.length} 个',
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 12,
+            ),
+          ),
+          TextButton(
+            onPressed: apps.isEmpty
+                ? null
+                : () => provider.selectWhitelistPackages(
+                      apps.map((app) => app.packageName),
                     ),
+            child: const Text('全选当前'),
+          ),
+          TextButton(
+            onPressed: apps.isEmpty
+                ? null
+                : () => provider.unselectWhitelistPackages(
+                      apps.map((app) => app.packageName),
+                    ),
+            child: const Text('取消当前'),
+          ),
+          TextButton(
+            onPressed: selected.isEmpty
+                ? null
+                : () => provider.unselectWhitelistPackages(selected),
+            child: const Text('取消已选'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedAppsStrip extends StatelessWidget {
+  const _SelectedAppsStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    final data = context.select<NetworkProvider, ({List<InstalledApp> apps})>(
+      (provider) {
+        final selected = provider.selectedWhitelistPackages;
+        return (
+          apps: provider.installedApps
+              .where((app) => selected.contains(app.packageName))
+              .toList()
+        );
+      },
+    );
+    if (data.apps.isEmpty) return const SizedBox.shrink();
+
+    final provider = context.read<NetworkProvider>();
+    return SizedBox(
+      height: 120,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        scrollDirection: Axis.horizontal,
+        itemCount: data.apps.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final app = data.apps[index];
+          return InputChip(
+            label: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    app.label.isEmpty ? app.packageName : app.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: isLoading ? null : provider.openVpnSettings,
-                    child: const Text('系统 VPN 设置'),
+                  Text(
+                    app.packageName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
                   ),
                 ],
               ),
             ),
+            onDeleted: () => provider.toggleWhitelistPackage(app.packageName),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _UsagePermissionPrompt extends StatelessWidget {
+  const _UsagePermissionPrompt();
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPermission = context.select<NetworkProvider, bool>(
+      (provider) => provider.hasUsageStatsPermission,
+    );
+    if (hasPermission) return const SizedBox.shrink();
+
+    final provider = context.read<NetworkProvider>();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text(
+              '流量统计需要允许“使用情况访问权限”，授权后刷新列表显示近 30 天流量。',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
           ),
+          TextButton(
+            onPressed: provider.openUsageAccessSettings,
+            child: const Text('去授权'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WhitelistStatusMessage extends StatelessWidget {
+  const _WhitelistStatusMessage();
+
+  @override
+  Widget build(BuildContext context) {
+    final message = context.select<NetworkProvider, String>(
+      (provider) => provider.appWhitelistVpnStatus.message,
+    );
+    if (message.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.lightBlueAccent,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WhitelistAppsList extends StatelessWidget {
+  final List<InstalledApp> apps;
+  final ValueChanged<String> onTogglePackage;
+
+  const _WhitelistAppsList({
+    required this.apps,
+    required this.onTogglePackage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoading = context.select<NetworkProvider, bool>(
+      (provider) => provider.appWhitelistState == MeasurementState.measuring,
+    );
+    final hasApps = context.select<NetworkProvider, bool>(
+      (provider) => provider.installedApps.isNotEmpty,
+    );
+    final isRunning = context.select<NetworkProvider, bool>(
+      (provider) => provider.appWhitelistVpnStatus.running,
+    );
+    final selected = context.select<NetworkProvider, Set<String>>(
+      (provider) => provider.selectedWhitelistPackages,
+    );
+
+    if (isLoading && !hasApps) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (apps.isEmpty) {
+      return const Center(
+        child: Text(
+          '未读取到可启动 App',
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      itemCount: apps.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final app = apps[index];
+        return CheckboxListTile(
+          value: selected.contains(app.packageName),
+          onChanged: isRunning ? null : (_) => onTogglePackage(app.packageName),
+          title: Text(
+            app.label.isEmpty ? app.packageName : app.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            '${app.packageName} · ${app.trafficLabel}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          secondary: Text(
+            app.trafficLabel,
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 12,
+            ),
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
         );
       },
+    );
+  }
+}
+
+class _WhitelistBottomBar extends StatelessWidget {
+  const _WhitelistBottomBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.select<
+        NetworkProvider,
+        ({
+          bool isLoading,
+          bool isRunning,
+          int selectedCount,
+        })>((provider) {
+      return (
+        isLoading: provider.appWhitelistState == MeasurementState.measuring,
+        isRunning: provider.appWhitelistVpnStatus.running,
+        selectedCount: provider.selectedWhitelistPackages.length,
+      );
+    });
+    final provider = context.read<NetworkProvider>();
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: FilledButton(
+                onPressed: state.isLoading ||
+                        (!state.isRunning && state.selectedCount == 0)
+                    ? null
+                    : state.isRunning
+                        ? provider.stopAppWhitelistVpn
+                        : provider.startAppWhitelistVpn,
+                child: Text(state.isRunning ? '关闭白名单' : '开启白名单'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: state.isLoading ? null : provider.openVpnSettings,
+              child: const Text('系统 VPN 设置'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
