@@ -271,6 +271,7 @@ class _AppWhitelistVpnScreen extends StatefulWidget {
 
 class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
   String _query = '';
+  final _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -278,6 +279,12 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<NetworkProvider>().refreshAppWhitelistVpn();
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -296,6 +303,9 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
                     app.label.toLowerCase().contains(normalizedQuery) ||
                     app.packageName.toLowerCase().contains(normalizedQuery))
                 .toList();
+        final selectedApps = provider.installedApps
+            .where((app) => selected.contains(app.packageName))
+            .toList();
 
         return Scaffold(
           appBar: AppBar(
@@ -313,15 +323,105 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                 child: TextField(
+                  controller: _searchController,
                   enabled: !status.running,
                   onChanged: (value) => setState(() => _query = value),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty || status.running
+                        ? null
+                        : IconButton(
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                            icon: const Icon(Icons.close),
+                            tooltip: '清空搜索',
+                          ),
                     hintText: '搜索 App 或包名',
                     isDense: true,
                   ),
                 ),
               ),
+              if (!status.running)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        '已选 ${selected.length} 个',
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: apps.isEmpty
+                            ? null
+                            : () => provider.selectWhitelistPackages(
+                                  apps.map((app) => app.packageName),
+                                ),
+                        child: const Text('全选当前'),
+                      ),
+                      TextButton(
+                        onPressed: apps.isEmpty
+                            ? null
+                            : () => provider.unselectWhitelistPackages(
+                                  apps.map((app) => app.packageName),
+                                ),
+                        child: const Text('取消当前'),
+                      ),
+                      TextButton(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () => provider.unselectWhitelistPackages(
+                                  selected,
+                                ),
+                        child: const Text('取消已选'),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!status.running && selectedApps.isNotEmpty)
+                SizedBox(
+                  height: 120,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: selectedApps.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final app = selectedApps[index];
+                      return InputChip(
+                        label: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 220),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                app.label.isEmpty ? app.packageName : app.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                app.packageName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        onDeleted: () =>
+                            provider.toggleWhitelistPackage(app.packageName),
+                      );
+                    },
+                  ),
+                ),
               if (status.message.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -368,9 +468,16 @@ class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 subtitle: Text(
-                                  app.packageName,
+                                  '${app.packageName} · ${app.trafficLabel}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                ),
+                                secondary: Text(
+                                  app.trafficLabel,
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 12,
+                                  ),
                                 ),
                                 controlAffinity:
                                     ListTileControlAffinity.leading,

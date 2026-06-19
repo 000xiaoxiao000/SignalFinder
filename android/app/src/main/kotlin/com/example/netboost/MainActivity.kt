@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import android.net.TrafficStats
 import android.net.VpnService
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -186,6 +187,8 @@ class MainActivity : FlutterActivity() {
                         .ifBlank { app.loadLabel(packageManager).toString() },
                     "uid" to app.uid,
                     "systemApp" to ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0),
+                    "rxBytes" to TrafficStats.getUidRxBytes(app.uid),
+                    "txBytes" to TrafficStats.getUidTxBytes(app.uid),
                 )
             }
             .sortedWith(

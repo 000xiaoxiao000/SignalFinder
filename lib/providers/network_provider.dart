@@ -243,6 +243,26 @@ class NetworkProvider extends ChangeNotifier {
     } else {
       selected.add(packageName);
     }
+    _setWhitelistPackages(selected);
+  }
+
+  void selectWhitelistPackages(Iterable<String> packageNames) {
+    final selected = _appWhitelistVpnStatus.allowedPackages.toSet()
+      ..addAll(packageNames.where((name) => name.isNotEmpty));
+    _setWhitelistPackages(selected);
+  }
+
+  void unselectWhitelistPackages(Iterable<String> packageNames) {
+    final selected = _appWhitelistVpnStatus.allowedPackages.toSet()
+      ..removeAll(packageNames);
+    _setWhitelistPackages(selected);
+  }
+
+  void clearWhitelistPackages() {
+    _setWhitelistPackages(const {});
+  }
+
+  void _setWhitelistPackages(Set<String> selected) {
     _appWhitelistVpnStatus = AppWhitelistVpnStatus(
       running: _appWhitelistVpnStatus.running,
       allowedPackages: selected.toList()..sort(),
