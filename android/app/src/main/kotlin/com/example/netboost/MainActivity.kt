@@ -2,7 +2,11 @@ package com.example.netboost
 
 import android.content.Context
 import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import android.net.VpnService
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
@@ -18,6 +22,7 @@ import android.telephony.CellInfoWcdma
 import android.telephony.ServiceState
 import android.telephony.SignalStrength
 import android.telephony.TelephonyManager
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -31,9 +36,13 @@ import kotlin.math.sqrt
 import java.util.concurrent.Executor
 
 class MainActivity : FlutterActivity() {
+    private val tag = "NetBoostMainActivity"
     private val channelName = "netboost/mobile_network"
     private var highPerfWifiLock: WifiManager.WifiLock? = null
     private val cellInfoTimeoutMs = 10000L
+    private val VPN_REQUEST_CODE = 4101
+    private var pendingVpnPackages: List<String> = emptyList()
+    private var pendingVpnResult: MethodChannel.Result? = null
 
     private data class TowerPoint(
         val lat: Double,
@@ -73,6 +82,20 @@ class MainActivity : FlutterActivity() {
                 "getMobileNetworkGeneration" -> result.success(getMobileNetworkGeneration())
                 "getCellSignals" -> getCellSignals(result)
                 "getNetworkTuningStatus" -> result.success(getNetworkTuningStatus())
+                "getInstalledApps" -> result.success(getInstalledApps())
+                "getAppWhitelistVpnStatus" -> result.success(getAppWhitelistVpnStatus())
+                "startAppWhitelistVpn" -> {
+                    val packages = call.argument<List<String>>("allowedPackages").orEmpty()
+                    startAppWhitelistVpn(packages, result)
+                }
+                "stopAppWhitelistVpn" -> {
+                    AppWhitelistVpnService.stop(this)
+                    result.success(getAppWhitelistVpnStatus())
+                }
+                "openVpnSettings" -> {
+                    openVpnSettings()
+                    result.success(null)
+                }
                 "checkRootStatus" -> result.success(checkRootStatus())
                 "runRootCommand" -> {
                     val commandId = call.argument<String>("commandId").orEmpty()
@@ -100,6 +123,150 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != VPN_REQUEST_CODE) return
+
+        val result = pendingVpnResult ?: return
+        val packages = pendingVpnPackages
+        pendingVpnResult = null
+        pendingVpnPackages = emptyList()
+
+        if (resultCode == RESULT_OK) {
+            Log.i(tag, "VPN permission granted for ${packages.size} packages")
+            runCatching {
+                AppWhitelistVpnService.start(this, packages)
+            }.onSuccess {
+                result.success(getAppWhitelistVpnStatus())
+            }.onFailure {
+                Log.e(tag, "Failed to start VPN service after permission", it)
+                result.success(
+                    mapOf(
+                        "running" to false,
+                        "allowedPackages" to packages,
+                        "message" to "VPN 服务启动失败：${it.message ?: it.javaClass.simpleName}",
+                    )
+                )
+            }
+        } else {
+            Log.i(tag, "VPN permission denied or canceled: $resultCode")
+            result.success(
+                mapOf(
+                    "running" to false,
+                    "allowedPackages" to packages,
+                    "message" to "用户取消 VPN 授权",
+                )
+            )
+        }
+    }
+
+    private fun getInstalledApps(): List<Map<String, Any?>> {
+        val packageManager = packageManager
+        val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val seenPackages = mutableSetOf<String>()
+        val apps = packageManager
+            .queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+            .mapNotNull { resolveInfo ->
+                val activityInfo = resolveInfo.activityInfo ?: return@mapNotNull null
+                val app = activityInfo.applicationInfo ?: return@mapNotNull null
+                val resolvedPackageName = activityInfo.packageName
+                if (resolvedPackageName == this.packageName) return@mapNotNull null
+                if (!seenPackages.add(resolvedPackageName)) return@mapNotNull null
+                if (packageManager.getLaunchIntentForPackage(resolvedPackageName) == null) {
+                    return@mapNotNull null
+                }
+                mapOf(
+                    "packageName" to resolvedPackageName,
+                    "label" to resolveInfo.loadLabel(packageManager).toString()
+                        .ifBlank { app.loadLabel(packageManager).toString() },
+                    "uid" to app.uid,
+                    "systemApp" to ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0),
+                )
+            }
+            .sortedWith(
+                compareBy<Map<String, Any?>> { it["systemApp"] as Boolean }
+                    .thenBy { (it["label"] as String).lowercase() }
+            )
+        Log.i(tag, "Loaded ${apps.size} launchable apps for whitelist")
+        return apps
+    }
+
+    private fun getAppWhitelistVpnStatus(): Map<String, Any?> {
+        return mapOf(
+            "running" to AppWhitelistVpnService.isRunning,
+            "allowedPackages" to AppWhitelistVpnService.allowedPackages,
+            "message" to if (AppWhitelistVpnService.isRunning) {
+                "白名单模式已开启"
+            } else {
+                "白名单模式未开启"
+            },
+        )
+    }
+
+    private fun startAppWhitelistVpn(
+        allowedPackages: List<String>,
+        result: MethodChannel.Result
+    ) {
+        val packages = allowedPackages.filter { it.isNotBlank() }.distinct()
+        if (packages.isEmpty()) {
+            result.success(
+                mapOf(
+                    "running" to false,
+                    "allowedPackages" to emptyList<String>(),
+                    "message" to "请至少选择一个允许联网的 App",
+                )
+            )
+            return
+        }
+
+        val permissionIntent = VpnService.prepare(this)
+        if (permissionIntent != null) {
+            Log.i(tag, "Requesting VPN permission for ${packages.size} packages")
+            pendingVpnResult?.success(
+                mapOf(
+                    "running" to false,
+                    "allowedPackages" to pendingVpnPackages,
+                    "message" to "上一次 VPN 授权请求已被新的请求替换",
+                )
+            )
+            pendingVpnPackages = packages
+            pendingVpnResult = result
+            runCatching {
+                startActivityForResult(permissionIntent, VPN_REQUEST_CODE)
+            }.onFailure {
+                pendingVpnResult = null
+                pendingVpnPackages = emptyList()
+                Log.e(tag, "Failed to launch VPN permission activity", it)
+                result.success(
+                    mapOf(
+                        "running" to false,
+                        "allowedPackages" to packages,
+                        "message" to "无法打开 VPN 授权页：${it.message ?: it.javaClass.simpleName}",
+                    )
+                )
+            }
+            return
+        }
+
+        Log.i(tag, "VPN already prepared; starting service for ${packages.size} packages")
+        runCatching {
+            AppWhitelistVpnService.start(this, packages)
+        }.onSuccess {
+            result.success(getAppWhitelistVpnStatus())
+        }.onFailure {
+            Log.e(tag, "Failed to start VPN service", it)
+            result.success(
+                mapOf(
+                    "running" to false,
+                    "allowedPackages" to packages,
+                    "message" to "VPN 服务启动失败：${it.message ?: it.javaClass.simpleName}",
+                )
+            )
         }
     }
 
@@ -882,6 +1049,20 @@ class MainActivity : FlutterActivity() {
 
     private fun openManageApplicationsSettings() {
         val intent = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { startActivity(intent) }
+            .onFailure {
+                startActivity(
+                    Intent(Settings.ACTION_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            }
+    }
+
+    private fun openVpnSettings() {
+        val intent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { startActivity(intent) }

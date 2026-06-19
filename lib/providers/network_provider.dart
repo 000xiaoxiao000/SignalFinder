@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../models/app_whitelist_vpn_status.dart';
 import '../models/cell_signal.dart';
+import '../models/installed_app.dart';
 import '../models/network_status.dart';
 import '../models/network_tuning_status.dart';
 import '../models/root_command.dart';
@@ -19,9 +21,11 @@ class NetworkProvider extends ChangeNotifier {
   NetworkStatus _currentStatus = NetworkStatus.empty();
   List<NetworkStatus> _history = [];
   List<CellSignal> _cellSignals = [];
+  List<InstalledApp> _installedApps = [];
   List<DnsServer> _dnsServers = DnsServer.defaultServers();
   DiagnosisResult? _diagnosisResult;
   NetworkTuningStatus _tuningStatus = NetworkTuningStatus.empty();
+  AppWhitelistVpnStatus _appWhitelistVpnStatus = AppWhitelistVpnStatus.empty();
   RootStatus _rootStatus = RootStatus.unknown();
   RootCommandResult _lastRootCommandResult = RootCommandResult.empty();
   String? _lockedCellSignalId;
@@ -30,6 +34,7 @@ class NetworkProvider extends ChangeNotifier {
   MeasurementState _networkState = MeasurementState.idle;
   MeasurementState _cellSignalState = MeasurementState.idle;
   MeasurementState _tuningState = MeasurementState.idle;
+  MeasurementState _appWhitelistState = MeasurementState.idle;
   MeasurementState _rootState = MeasurementState.idle;
   MeasurementState _dnsState = MeasurementState.idle;
   MeasurementState _diagnosisState = MeasurementState.idle;
@@ -46,9 +51,13 @@ class NetworkProvider extends ChangeNotifier {
   NetworkStatus get currentStatus => _currentStatus;
   List<NetworkStatus> get history => List.unmodifiable(_history);
   List<CellSignal> get cellSignals => List.unmodifiable(_cellSignals);
+  List<InstalledApp> get installedApps => List.unmodifiable(_installedApps);
   List<DnsServer> get dnsServers => List.unmodifiable(_dnsServers);
   DiagnosisResult? get diagnosisResult => _diagnosisResult;
   NetworkTuningStatus get tuningStatus => _tuningStatus;
+  AppWhitelistVpnStatus get appWhitelistVpnStatus => _appWhitelistVpnStatus;
+  Set<String> get selectedWhitelistPackages =>
+      _appWhitelistVpnStatus.allowedPackages.toSet();
   RootStatus get rootStatus => _rootStatus;
   RootCommandResult get lastRootCommandResult => _lastRootCommandResult;
   String? get lockedCellSignalId => _lockedCellSignalId;
@@ -56,6 +65,7 @@ class NetworkProvider extends ChangeNotifier {
   MeasurementState get networkState => _networkState;
   MeasurementState get cellSignalState => _cellSignalState;
   MeasurementState get tuningState => _tuningState;
+  MeasurementState get appWhitelistState => _appWhitelistState;
   MeasurementState get rootState => _rootState;
   MeasurementState get dnsState => _dnsState;
   MeasurementState get diagnosisState => _diagnosisState;
@@ -208,6 +218,77 @@ class NetworkProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshAppWhitelistVpn() async {
+    if (_appWhitelistState == MeasurementState.measuring) return;
+    _appWhitelistState = MeasurementState.measuring;
+    notifyListeners();
+
+    try {
+      final apps = await _networkService.getInstalledApps();
+      final status = await _networkService.getAppWhitelistVpnStatus();
+      _installedApps = apps;
+      _appWhitelistVpnStatus = status;
+      _appWhitelistState = MeasurementState.done;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _appWhitelistState = MeasurementState.error;
+    }
+    notifyListeners();
+  }
+
+  void toggleWhitelistPackage(String packageName) {
+    final selected = _appWhitelistVpnStatus.allowedPackages.toSet();
+    if (selected.contains(packageName)) {
+      selected.remove(packageName);
+    } else {
+      selected.add(packageName);
+    }
+    _appWhitelistVpnStatus = AppWhitelistVpnStatus(
+      running: _appWhitelistVpnStatus.running,
+      allowedPackages: selected.toList()..sort(),
+      message: _appWhitelistVpnStatus.message,
+    );
+    notifyListeners();
+  }
+
+  Future<void> startAppWhitelistVpn() async {
+    if (_appWhitelistState == MeasurementState.measuring) return;
+    _appWhitelistState = MeasurementState.measuring;
+    notifyListeners();
+
+    try {
+      _appWhitelistVpnStatus = await _networkService.startAppWhitelistVpn(
+        _appWhitelistVpnStatus.allowedPackages,
+      );
+      _appWhitelistState = MeasurementState.done;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _appWhitelistState = MeasurementState.error;
+    }
+    notifyListeners();
+  }
+
+  Future<void> stopAppWhitelistVpn() async {
+    if (_appWhitelistState == MeasurementState.measuring) return;
+    _appWhitelistState = MeasurementState.measuring;
+    notifyListeners();
+
+    try {
+      final selectedPackages = _appWhitelistVpnStatus.allowedPackages;
+      final status = await _networkService.stopAppWhitelistVpn();
+      _appWhitelistVpnStatus = AppWhitelistVpnStatus(
+        running: status.running,
+        allowedPackages: selectedPackages,
+        message: status.message,
+      );
+      _appWhitelistState = MeasurementState.done;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _appWhitelistState = MeasurementState.error;
+    }
+    notifyListeners();
+  }
+
   Future<void> checkRootStatus() async {
     if (_rootState == MeasurementState.measuring) return;
     _rootState = MeasurementState.measuring;
@@ -293,6 +374,10 @@ class NetworkProvider extends ChangeNotifier {
 
   Future<void> openManageApplicationsSettings() async {
     await _networkService.openManageApplicationsSettings();
+  }
+
+  Future<void> openVpnSettings() async {
+    await _networkService.openVpnSettings();
   }
 
   Future<void> setHighPerfWifiLock(bool enabled) async {

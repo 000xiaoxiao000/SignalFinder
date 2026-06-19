@@ -160,9 +160,9 @@ class DiagnosisService {
 
     tips.add(const DiagnosisTip(
       icon: '🔄',
-      title: '暂时关闭后台应用刷新',
+      title: '开启 App 联网白名单',
       detail:
-          '选择一个临时时长作为提醒，然后进入系统应用设置，关闭不常用 App 的后台数据权限，把带宽留给当前正在用的 App。到时后再恢复需要后台联网的应用。',
+          '在网络调优里选择当前需要联网的 App，开启本地 VPN 白名单后，其它 App 会被临时拦截，把带宽留给当前任务。用完后记得关闭白名单。',
       priority: TipPriority.low,
       action: DiagnosisTipAction.temporaryBackgroundRefreshPause,
     ));
