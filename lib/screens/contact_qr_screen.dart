@@ -19,6 +19,7 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
   final DateFormat _timeFormat = DateFormat('HH:mm:ss.SSS');
   final AppLogService _logs = AppLogService.instance;
   final Set<String> _savingAssets = {};
+  _LogLevelFilter _logLevelFilter = _LogLevelFilter.all;
 
   @override
   void initState() {
@@ -148,79 +149,120 @@ class _ContactQrScreenState extends State<ContactQrScreen> {
       isScrollControlled: true,
       backgroundColor: const Color(0xFF1F1F24),
       builder: (context) {
-        return AnimatedBuilder(
-          animation: _logs,
-          builder: (context, _) {
-            final entries = _logs.entries;
-            return SafeArea(
-              child: SizedBox(
-                height: MediaQuery.sizeOf(context).height * 0.72,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return AnimatedBuilder(
+              animation: _logs,
+              builder: (context, _) {
+                final entries = _filteredLogEntries();
+                return SafeArea(
+                  child: SizedBox(
+                    height: MediaQuery.sizeOf(context).height * 0.72,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            '运行日志',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.bold),
+                          Row(
+                            children: [
+                              Text(
+                                '运行日志',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: _logs.clear,
+                                child: const Text('清空'),
+                              ),
+                              IconButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                icon: const Icon(Icons.close),
+                                tooltip: '关闭',
+                              ),
+                            ],
                           ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: _logs.clear,
-                            child: const Text('清空'),
+                          const SizedBox(height: 12),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: SegmentedButton<_LogLevelFilter>(
+                              segments: _LogLevelFilter.values
+                                  .map(
+                                    (filter) => ButtonSegment(
+                                      value: filter,
+                                      label: Text(filter.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              selected: {_logLevelFilter},
+                              onSelectionChanged: (selected) {
+                                setSheetState(() {
+                                  _logLevelFilter = selected.first;
+                                });
+                              },
+                            ),
                           ),
-                          IconButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close),
-                            tooltip: '关闭',
+                          const SizedBox(height: 12),
+                          Expanded(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black26,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: entries.isEmpty
+                                  ? Center(
+                                      child: Text(
+                                        _logs.entries.isEmpty
+                                            ? '暂无日志'
+                                            : '当前级别暂无日志',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(color: Colors.white54),
+                                      ),
+                                    )
+                                  : ListView.separated(
+                                      padding: const EdgeInsets.all(12),
+                                      itemCount: entries.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(height: 8),
+                                      itemBuilder: (context, index) {
+                                        return _LogLine(
+                                          entry: entries[index],
+                                          timeFormat: _timeFormat,
+                                        );
+                                      },
+                                    ),
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.black26,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: entries.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    '暂无日志',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(color: Colors.white54),
-                                  ),
-                                )
-                              : ListView.separated(
-                                  padding: const EdgeInsets.all(12),
-                                  itemCount: entries.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(height: 8),
-                                  itemBuilder: (context, index) {
-                                    return _LogLine(
-                                      entry: entries[index],
-                                      timeFormat: _timeFormat,
-                                    );
-                                  },
-                                ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             );
           },
         );
       },
     );
+  }
+
+  List<AppLogEntry> _filteredLogEntries() {
+    return switch (_logLevelFilter) {
+      _LogLevelFilter.all => _logs.entries,
+      _LogLevelFilter.info => _logs.entries
+          .where((entry) => entry.level == AppLogLevel.info)
+          .toList(),
+      _LogLevelFilter.warning => _logs.entries
+          .where((entry) => entry.level == AppLogLevel.warning)
+          .toList(),
+      _LogLevelFilter.error => _logs.entries
+          .where((entry) => entry.level == AppLogLevel.error)
+          .toList(),
+    };
   }
 
   @override
@@ -394,6 +436,20 @@ class _LogLine extends StatelessWidget {
           ),
     );
   }
+}
+
+enum _LogLevelFilter {
+  all,
+  info,
+  warning,
+  error;
+
+  String get label => switch (this) {
+        _LogLevelFilter.all => '全部',
+        _LogLevelFilter.info => 'INFO',
+        _LogLevelFilter.warning => 'WARN',
+        _LogLevelFilter.error => 'ERROR',
+      };
 }
 
 class _QrContact {

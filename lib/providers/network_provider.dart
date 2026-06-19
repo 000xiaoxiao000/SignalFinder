@@ -47,10 +47,13 @@ class NetworkProvider extends ChangeNotifier {
   String _errorMessage = '';
   DateTime? _backgroundRefreshPauseUntil;
   DateTime? _cellSignalRefreshStartedAt;
+  DateTime? _installedAppsFetchedAt;
 
   Timer? _autoRefreshTimer;
   Timer? _backgroundRefreshTimer;
   Timer? _cellSignalRefreshTicker;
+
+  static const Duration _installedAppsCacheDuration = Duration(minutes: 3);
 
   NetworkStatus get currentStatus => _currentStatus;
   List<NetworkStatus> get history => List.unmodifiable(_history);
@@ -227,17 +230,24 @@ class NetworkProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> refreshAppWhitelistVpn() async {
+  Future<void> refreshAppWhitelistVpn({bool forceAppsRefresh = false}) async {
     if (_appWhitelistState == MeasurementState.measuring) return;
     _appWhitelistState = MeasurementState.measuring;
     notifyListeners();
 
     try {
-      final apps = await _networkService.getInstalledApps();
-      _hasUsageStatsPermission =
+      final hasUsageStatsPermission =
           await _networkService.hasUsageStatsPermission();
+      final shouldRefreshApps = forceAppsRefresh ||
+          _installedApps.isEmpty ||
+          _hasUsageStatsPermission != hasUsageStatsPermission ||
+          _isInstalledAppsCacheExpired;
+      if (shouldRefreshApps) {
+        _installedApps = await _networkService.getInstalledApps();
+        _installedAppsFetchedAt = DateTime.now();
+      }
+      _hasUsageStatsPermission = hasUsageStatsPermission;
       final status = await _networkService.getAppWhitelistVpnStatus();
-      _installedApps = apps;
       _appWhitelistVpnStatus = status;
       _appWhitelistState = MeasurementState.done;
     } catch (e, stack) {
@@ -246,6 +256,12 @@ class NetworkProvider extends ChangeNotifier {
       _logs.error('刷新应用白名单 VPN 状态失败', e, stack);
     }
     notifyListeners();
+  }
+
+  bool get _isInstalledAppsCacheExpired {
+    final fetchedAt = _installedAppsFetchedAt;
+    if (fetchedAt == null) return true;
+    return DateTime.now().difference(fetchedAt) > _installedAppsCacheDuration;
   }
 
   void toggleWhitelistPackage(String packageName) {
@@ -408,6 +424,7 @@ class NetworkProvider extends ChangeNotifier {
       _hasUsageStatsPermission =
           await _networkService.hasUsageStatsPermission();
       _installedApps = await _networkService.getInstalledApps();
+      _installedAppsFetchedAt = DateTime.now();
     } catch (e, stack) {
       _logs.error('诊断读取应用流量失败', e, stack);
     }
