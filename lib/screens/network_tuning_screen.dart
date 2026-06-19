@@ -175,34 +175,16 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
   }
 }
 
-class _AppWhitelistVpnCard extends StatefulWidget {
+class _AppWhitelistVpnCard extends StatelessWidget {
   const _AppWhitelistVpnCard();
-
-  @override
-  State<_AppWhitelistVpnCard> createState() => _AppWhitelistVpnCardState();
-}
-
-class _AppWhitelistVpnCardState extends State<_AppWhitelistVpnCard> {
-  String _query = '';
 
   @override
   Widget build(BuildContext context) {
     return Consumer<NetworkProvider>(
       builder: (context, provider, _) {
         final status = provider.appWhitelistVpnStatus;
-        final selected = provider.selectedWhitelistPackages;
         final isLoading =
             provider.appWhitelistState == MeasurementState.measuring;
-        final apps = provider.installedApps;
-        final normalizedQuery = _query.trim().toLowerCase();
-        final filteredApps = normalizedQuery.isEmpty
-            ? apps
-            : apps
-                .where((app) =>
-                    app.label.toLowerCase().contains(normalizedQuery) ||
-                    app.packageName.toLowerCase().contains(normalizedQuery))
-                .toList();
-        final visibleApps = filteredApps.take(30).toList();
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
@@ -231,82 +213,28 @@ class _AppWhitelistVpnCardState extends State<_AppWhitelistVpnCard> {
                   style: TextStyle(color: Colors.white70, height: 1.45),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  enabled: !status.running,
-                  onChanged: (value) => setState(() => _query = value),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    hintText: '搜索 App 或包名',
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (isLoading && apps.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (apps.isEmpty)
-                  const Text(
-                    '未读取到可启动 App',
-                    style: TextStyle(color: Colors.white54),
-                  )
-                else
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 320),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: visibleApps.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final app = visibleApps[index];
-                        return CheckboxListTile(
-                          value: selected.contains(app.packageName),
-                          onChanged: status.running
-                              ? null
-                              : (_) => provider
-                                  .toggleWhitelistPackage(app.packageName),
-                          title: Text(
-                            app.label.isEmpty ? app.packageName : app.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            app.packageName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          controlAffinity: ListTileControlAffinity.leading,
-                          contentPadding: EdgeInsets.zero,
-                        );
-                      },
-                    ),
-                  ),
-                if (filteredApps.length > visibleApps.length) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '已显示前 ${visibleApps.length} 个匹配 App',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                ],
-                const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     FilledButton(
-                      onPressed:
-                          isLoading || (!status.running && selected.isEmpty)
-                              ? null
-                              : status.running
-                                  ? provider.stopAppWhitelistVpn
-                                  : provider.startAppWhitelistVpn,
-                      child: Text(status.running ? '关闭白名单' : '开启白名单'),
+                      onPressed: isLoading
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const _AppWhitelistVpnScreen(),
+                                ),
+                              );
+                            },
+                      child: const Text('配置白名单'),
                     ),
                     FilledButton.tonal(
-                      onPressed:
-                          isLoading ? null : provider.refreshAppWhitelistVpn,
-                      child: const Text('刷新列表'),
+                      onPressed: isLoading || !status.running
+                          ? null
+                          : provider.stopAppWhitelistVpn,
+                      child: const Text('关闭白名单'),
                     ),
                     TextButton(
                       onPressed: isLoading ? null : provider.openVpnSettings,
@@ -314,13 +242,6 @@ class _AppWhitelistVpnCardState extends State<_AppWhitelistVpnCard> {
                     ),
                   ],
                 ),
-                if (!status.running && selected.isEmpty) ...[
-                  const SizedBox(height: 8),
-                  const Text(
-                    '请先勾选至少一个允许联网的 App',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                ],
                 if (status.message.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -333,6 +254,155 @@ class _AppWhitelistVpnCardState extends State<_AppWhitelistVpnCard> {
                   ),
                 ],
               ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AppWhitelistVpnScreen extends StatefulWidget {
+  const _AppWhitelistVpnScreen();
+
+  @override
+  State<_AppWhitelistVpnScreen> createState() => _AppWhitelistVpnScreenState();
+}
+
+class _AppWhitelistVpnScreenState extends State<_AppWhitelistVpnScreen> {
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<NetworkProvider>().refreshAppWhitelistVpn();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<NetworkProvider>(
+      builder: (context, provider, _) {
+        final status = provider.appWhitelistVpnStatus;
+        final selected = provider.selectedWhitelistPackages;
+        final isLoading =
+            provider.appWhitelistState == MeasurementState.measuring;
+        final normalizedQuery = _query.trim().toLowerCase();
+        final apps = normalizedQuery.isEmpty
+            ? provider.installedApps
+            : provider.installedApps
+                .where((app) =>
+                    app.label.toLowerCase().contains(normalizedQuery) ||
+                    app.packageName.toLowerCase().contains(normalizedQuery))
+                .toList();
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('App 联网白名单'),
+            actions: [
+              IconButton(
+                onPressed: isLoading ? null : provider.refreshAppWhitelistVpn,
+                icon: const Icon(Icons.refresh),
+                tooltip: '刷新列表',
+              ),
+            ],
+          ),
+          body: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: TextField(
+                  enabled: !status.running,
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: '搜索 App 或包名',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              if (status.message.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      status.message,
+                      style: const TextStyle(
+                        color: Colors.lightBlueAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: isLoading && provider.installedApps.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : apps.isEmpty
+                        ? const Center(
+                            child: Text(
+                              '未读取到可启动 App',
+                              style: TextStyle(color: Colors.white54),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: apps.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final app = apps[index];
+                              return CheckboxListTile(
+                                value: selected.contains(app.packageName),
+                                onChanged: status.running
+                                    ? null
+                                    : (_) => provider.toggleWhitelistPackage(
+                                          app.packageName,
+                                        ),
+                                title: Text(
+                                  app.label.isEmpty
+                                      ? app.packageName
+                                      : app.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  app.packageName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed:
+                          isLoading || (!status.running && selected.isEmpty)
+                              ? null
+                              : status.running
+                                  ? provider.stopAppWhitelistVpn
+                                  : provider.startAppWhitelistVpn,
+                      child: Text(status.running ? '关闭白名单' : '开启白名单'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: isLoading ? null : provider.openVpnSettings,
+                    child: const Text('系统 VPN 设置'),
+                  ),
+                ],
+              ),
             ),
           ),
         );
