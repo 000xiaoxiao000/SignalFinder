@@ -16,5 +16,6 @@ void main() {
     expect(find.text('找信号'), findsOneWidget);
     expect(find.text('DNS 优选'), findsOneWidget);
     expect(find.text('网络诊断'), findsOneWidget);
+    expect(find.text('二维码'), findsOneWidget);
   });
 }

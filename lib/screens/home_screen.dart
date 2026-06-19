@@ -6,6 +6,7 @@ import 'dns_screen.dart';
 import 'diagnosis_screen.dart';
 import 'network_tuning_screen.dart';
 import 'signal_finder_screen.dart';
+import 'contact_qr_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -48,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SignalFinderScreen(),
           DnsScreen(),
           DiagnosisScreen(),
+          ContactQrScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -59,6 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.dns), label: 'DNS 优选'),
           NavigationDestination(
               icon: Icon(Icons.medical_services_outlined), label: '网络诊断'),
+          NavigationDestination(icon: Icon(Icons.qr_code_2), label: '二维码'),
         ],
       ),
     );
