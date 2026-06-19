@@ -1,4 +1,5 @@
 import '../models/network_status.dart';
+import '../models/installed_app.dart';
 
 enum DiagnosisIssue {
   highLatency,
@@ -15,15 +16,37 @@ class DiagnosisResult {
   final List<DiagnosisIssue> issues;
   final String summary;
   final List<DiagnosisTip> tips;
+  final List<NetworkImpactApp> impactApps;
+  final bool canInspectAppTraffic;
   final int score; // 0-100
 
   const DiagnosisResult({
     required this.issues,
     required this.summary,
     required this.tips,
+    this.impactApps = const [],
+    this.canInspectAppTraffic = false,
     required this.score,
   });
 }
+
+class NetworkImpactApp {
+  final String packageName;
+  final String label;
+  final String trafficLabel;
+  final int totalBytes;
+  final ImpactLevel level;
+
+  const NetworkImpactApp({
+    required this.packageName,
+    required this.label,
+    required this.trafficLabel,
+    required this.totalBytes,
+    required this.level,
+  });
+}
+
+enum ImpactLevel { high, medium, low }
 
 class DiagnosisTip {
   final String title;
@@ -46,7 +69,11 @@ enum TipPriority { high, medium, low }
 enum DiagnosisTipAction { temporaryBackgroundRefreshPause }
 
 class DiagnosisService {
-  DiagnosisResult diagnose(NetworkStatus status) {
+  DiagnosisResult diagnose(
+    NetworkStatus status, {
+    List<InstalledApp> installedApps = const [],
+    bool canInspectAppTraffic = false,
+  }) {
     if (!status.isConnected) {
       return const DiagnosisResult(
         issues: [DiagnosisIssue.noConnection],
@@ -69,6 +96,7 @@ class DiagnosisService {
       );
     }
 
+    final impactApps = _findImpactApps(installedApps, canInspectAppTraffic);
     final issues = <DiagnosisIssue>[];
     final tips = <DiagnosisTip>[];
     int score = 100;
@@ -119,10 +147,12 @@ class DiagnosisService {
     if (status.downloadSpeedMbps > 0 && status.downloadSpeedMbps < 1) {
       issues.add(DiagnosisIssue.slowSpeed);
       score -= 20;
-      tips.add(const DiagnosisTip(
-        icon: '🐢',
+      tips.add(DiagnosisTip(
+        icon: '⏬',
         title: '下载速度极慢',
-        detail: '当前下载速度低于 1Mbps，看视频和下载文件会非常慢。关闭不用的 App，减少带宽占用。',
+        detail: impactApps.isEmpty
+            ? '当前下载速度低于 1Mbps，看视频和下载文件会非常慢。关闭不用的 App，减少带宽占用。'
+            : '当前下载速度低于 1Mbps，看视频和下载文件会非常慢。优先检查下方流量占用较高的 App，并关闭不用的后台同步、下载或播放任务。',
         priority: TipPriority.high,
       ));
     }
@@ -182,7 +212,33 @@ class DiagnosisService {
       issues: issues.isEmpty ? [DiagnosisIssue.ok] : issues,
       summary: summary,
       tips: tips,
+      impactApps: impactApps,
+      canInspectAppTraffic: canInspectAppTraffic,
       score: score.clamp(0, 100),
     );
+  }
+
+  List<NetworkImpactApp> _findImpactApps(
+    List<InstalledApp> apps,
+    bool canInspectAppTraffic,
+  ) {
+    if (!canInspectAppTraffic) return const [];
+    final trafficApps = apps.where((app) => app.totalBytes > 0).toList()
+      ..sort((a, b) => b.totalBytes.compareTo(a.totalBytes));
+    return trafficApps.take(5).map((app) {
+      return NetworkImpactApp(
+        packageName: app.packageName,
+        label: app.label.isEmpty ? app.packageName : app.label,
+        trafficLabel: app.trafficLabel,
+        totalBytes: app.totalBytes,
+        level: _impactLevel(app.totalBytes),
+      );
+    }).toList();
+  }
+
+  ImpactLevel _impactLevel(int totalBytes) {
+    if (totalBytes >= 1024 * 1024 * 1024) return ImpactLevel.high;
+    if (totalBytes >= 100 * 1024 * 1024) return ImpactLevel.medium;
+    return ImpactLevel.low;
   }
 }
