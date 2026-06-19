@@ -29,6 +29,7 @@ class NetworkProvider extends ChangeNotifier {
   NetworkTuningStatus _tuningStatus = NetworkTuningStatus.empty();
   AppWhitelistVpnStatus _appWhitelistVpnStatus = AppWhitelistVpnStatus.empty();
   bool _hasUsageStatsPermission = false;
+  bool _waitingForUsageAccessPermission = false;
   RootStatus _rootStatus = RootStatus.unknown();
   RootCommandResult _lastRootCommandResult = RootCommandResult.empty();
   String? _lockedCellSignalId;
@@ -387,12 +388,42 @@ class NetworkProvider extends ChangeNotifier {
 
     try {
       await runFullMeasurement();
-      _diagnosisResult = _diagnosisService.diagnose(_currentStatus);
+      await _refreshAppTrafficForDiagnosis();
+      _diagnosisResult = _diagnosisService.diagnose(
+        _currentStatus,
+        installedApps: _installedApps,
+        canInspectAppTraffic: _hasUsageStatsPermission,
+      );
       _diagnosisState = MeasurementState.done;
     } catch (e, stack) {
       _errorMessage = e.toString();
       _diagnosisState = MeasurementState.error;
       _logs.error('网络诊断失败', e, stack);
+    }
+    notifyListeners();
+  }
+
+  Future<void> _refreshAppTrafficForDiagnosis() async {
+    try {
+      _hasUsageStatsPermission =
+          await _networkService.hasUsageStatsPermission();
+      _installedApps = await _networkService.getInstalledApps();
+    } catch (e, stack) {
+      _logs.error('诊断读取应用流量失败', e, stack);
+    }
+  }
+
+  Future<void> handleAppResumed() async {
+    if (!_waitingForUsageAccessPermission) return;
+    _waitingForUsageAccessPermission = false;
+    await _refreshAppTrafficForDiagnosis();
+    final result = _diagnosisResult;
+    if (result != null) {
+      _diagnosisResult = _diagnosisService.diagnose(
+        _currentStatus,
+        installedApps: _installedApps,
+        canInspectAppTraffic: _hasUsageStatsPermission,
+      );
     }
     notifyListeners();
   }
@@ -418,6 +449,7 @@ class NetworkProvider extends ChangeNotifier {
   }
 
   Future<void> openUsageAccessSettings() async {
+    _waitingForUsageAccessPermission = true;
     await _networkService.openUsageAccessSettings();
   }
 

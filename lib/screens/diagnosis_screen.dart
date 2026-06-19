@@ -30,6 +30,8 @@ class DiagnosisScreen extends StatelessWidget {
                   if (result != null && !isDiagnosing) ...[
                     _ScoreCard(score: result.score, summary: result.summary),
                     const SizedBox(height: 16),
+                    _ImpactAppsCard(result: result),
+                    const SizedBox(height: 16),
                     _TipsList(tips: result.tips),
                   ],
                   if (result == null && !isDiagnosing) const _EmptyState(),
@@ -203,6 +205,153 @@ class _TipsList extends StatelessWidget {
         const SizedBox(height: 12),
         ...tips.map((tip) => _TipCard(tip: tip)),
       ],
+    );
+  }
+}
+
+class _ImpactAppsCard extends StatelessWidget {
+  final DiagnosisResult result;
+
+  const _ImpactAppsCard({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final apps = result.impactApps;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.apps_outage, color: Colors.lightBlueAccent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '可能影响网络的 APP',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              result.canInspectAppTraffic
+                  ? apps.isEmpty
+                      ? '未发现明显高流量 App。'
+                      : '按近 30 天流量排序，优先检查这些 App 是否在下载、同步或后台播放。'
+                  : '需要允许“使用情况访问权限”后，才能根据流量统计判断哪些 App 可能占用网络。',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+            if (!result.canInspectAppTraffic) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed:
+                      context.read<NetworkProvider>().openUsageAccessSettings,
+                  icon: const Icon(Icons.admin_panel_settings_outlined),
+                  label: const Text('去授权流量统计'),
+                ),
+              ),
+            ],
+            if (apps.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ...apps.map((app) => _ImpactAppTile(app: app)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ImpactAppTile extends StatelessWidget {
+  final NetworkImpactApp app;
+
+  const _ImpactAppTile({required this.app});
+
+  Color get _levelColor {
+    switch (app.level) {
+      case ImpactLevel.high:
+        return const Color(0xFFFF6D00);
+      case ImpactLevel.medium:
+        return const Color(0xFFFFD600);
+      case ImpactLevel.low:
+        return Colors.lightBlueAccent;
+    }
+  }
+
+  String get _levelLabel {
+    switch (app.level) {
+      case ImpactLevel.high:
+        return '高';
+      case ImpactLevel.medium:
+        return '中';
+      case ImpactLevel.low:
+        return '低';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _levelColor.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.network_check, size: 18, color: _levelColor),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  app.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  app.packageName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                app.trafficLabel,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                '影响 $_levelLabel',
+                style: TextStyle(color: _levelColor, fontSize: 11),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
