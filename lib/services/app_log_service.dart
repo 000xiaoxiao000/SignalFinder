@@ -48,6 +48,12 @@ class AppLogService extends ChangeNotifier {
     Object? error,
     StackTrace? stackTrace,
   ]) {
+    final levelName = switch (level) {
+      AppLogLevel.info => 'INFO',
+      AppLogLevel.warning => 'WARN',
+      AppLogLevel.error => 'ERROR',
+    };
+    debugPrint('[$levelName] $message${error == null ? '' : ' $error'}');
     _entries.insert(
       0,
       AppLogEntry(

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 import '../models/dns_result.dart';
+import 'app_log_service.dart';
 
 class DnsService {
   static const String _testDomain = 'baidu.com';
   static const int _dnsPort = 53;
   static const int _timeoutMs = 3000;
+  final _logs = AppLogService.instance;
 
   /// DNS query packet for A record of _testDomain
   List<int> _buildDnsQuery() {
@@ -39,6 +41,7 @@ class DnsService {
       return await _testSystemDns();
     }
     try {
+      _logs.info('开始测试 DNS：$dnsAddress');
       final completer = Completer<int>();
       final start = DateTime.now();
       final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
@@ -61,19 +64,30 @@ class DnsService {
         }
       });
 
-      return await completer.future;
-    } catch (_) {
+      final latency = await completer.future;
+      if (latency >= 0) {
+        _logs.info('DNS $dnsAddress 测试完成：${latency}ms');
+      } else {
+        _logs.warning('DNS $dnsAddress 测试超时');
+      }
+      return latency;
+    } catch (e, stack) {
+      _logs.error('DNS $dnsAddress 测试失败', e, stack);
       return -1;
     }
   }
 
   Future<int> _testSystemDns() async {
     try {
+      _logs.info('开始测试系统 DNS');
       final start = DateTime.now();
       await InternetAddress.lookup(_testDomain)
           .timeout(const Duration(milliseconds: _timeoutMs));
-      return DateTime.now().difference(start).inMilliseconds;
-    } catch (_) {
+      final latency = DateTime.now().difference(start).inMilliseconds;
+      _logs.info('系统 DNS 测试完成：${latency}ms');
+      return latency;
+    } catch (e, stack) {
+      _logs.error('系统 DNS 测试失败', e, stack);
       return -1;
     }
   }
