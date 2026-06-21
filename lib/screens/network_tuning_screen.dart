@@ -161,12 +161,6 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
                 detail:
                     'BBR、rmem/wmem、队列策略等属于内核参数，普通 App 不应直接修改。Root 环境可调，但需要按设备和网络验证，错误配置会降低稳定性。',
               ),
-              const _TuningCard(
-                title: '网络优先级策略',
-                capability: '系统受限',
-                detail:
-                    'Android 已移除或限制多数全局网络偏好 API。普通 App 可以监测 Wi-Fi 弱网并提醒切换移动网络，但不能强行替用户切流量。',
-              ),
               const SizedBox(height: 32),
             ],
           ),
