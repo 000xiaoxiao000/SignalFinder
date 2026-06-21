@@ -40,10 +40,8 @@ android {
 
     applicationVariants.all {
         outputs.all {
-            if (name == "release") {
-                (this as BaseVariantOutputImpl).outputFileName =
-                    "SignalFinder-v${versionName}-release.apk"
-            }
+            (this as BaseVariantOutputImpl).outputFileName =
+                "SignalFinder-v${versionName}.apk"
         }
     }
 }
