@@ -310,3 +310,4 @@ assets/qr/                        二维码图片资源
 本项目采用 Apache License 2.0 开源许可证。你可以在遵守许可证条款的前提下使用、修改和分发本项目代码。
 
 详见 [LICENSE](./LICENSE)。
+
