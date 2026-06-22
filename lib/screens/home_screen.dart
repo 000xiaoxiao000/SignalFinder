@@ -127,11 +127,13 @@ class _MonitorTab extends StatelessWidget {
                     isAutoRefreshing: provider.isAutoRefreshing,
                   ),
                   const SizedBox(height: 16),
+                  _StabilityCard(status: status),
+                  const SizedBox(height: 16),
                   _MetricsRow(status: status),
                   const SizedBox(height: 16),
                   _HistoryCard(history: provider.history),
                   const SizedBox(height: 16),
-                  const _QuickActionsCard(),
+                  _QuickActionsCard(status: status),
                   const SizedBox(height: 32),
                 ]),
               ),
@@ -250,6 +252,122 @@ class _SignalCard extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StabilityCard extends StatelessWidget {
+  final NetworkStatus status;
+
+  const _StabilityCard({required this.status});
+
+  Color _color(NetworkStatus status) {
+    if (!status.isConnected) return Colors.grey;
+    switch (status.stabilityState) {
+      case NetworkStabilityState.stable:
+        return const Color(0xFF00C853);
+      case NetworkStabilityState.slightJitter:
+      case NetworkStabilityState.recovering:
+        return const Color(0xFFFFD600);
+      case NetworkStabilityState.congested:
+      case NetworkStabilityState.highLoss:
+        return const Color(0xFFFF6D00);
+      case NetworkStabilityState.likelyDrop:
+        return Colors.redAccent;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _color(status);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.health_and_safety_outlined, color: color),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '平稳状态：${status.stabilityLabel}',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: color,
+                        ),
+                  ),
+                ),
+                Text(
+                  '${status.stabilityScore} 分',
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              status.stabilityAdvice,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _CompactMetric(
+                  label: '抖动',
+                  value: status.isConnected ? '${status.jitterMs}ms' : '--',
+                ),
+                _CompactMetric(
+                  label: '连续失败',
+                  value: status.isConnected
+                      ? '${status.consecutiveFailures} 次'
+                      : '--',
+                ),
+                _CompactMetric(
+                  label: '丢包',
+                  value: status.isConnected
+                      ? '${status.packetLossPercent.toStringAsFixed(0)}%'
+                      : '--',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactMetric extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _CompactMetric({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        '$label $value',
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
       ),
     );
   }
@@ -454,7 +572,9 @@ class _HistoryItem extends StatelessWidget {
 }
 
 class _QuickActionsCard extends StatelessWidget {
-  const _QuickActionsCard();
+  final NetworkStatus status;
+
+  const _QuickActionsCard({required this.status});
 
   @override
   Widget build(BuildContext context) {
@@ -492,6 +612,30 @@ class _QuickActionsCard extends StatelessWidget {
                       label: '测试速度',
                       onTap: () =>
                           context.read<NetworkProvider>().runFullMeasurement(),
+                    ),
+                    _ActionButton(
+                      width: itemWidth,
+                      icon: status.type == NetworkType.wifi
+                          ? Icons.wifi
+                          : Icons.signal_cellular_alt,
+                      label:
+                          status.type == NetworkType.wifi ? 'Wi-Fi 设置' : '移动网络',
+                      onTap: () {
+                        final provider = context.read<NetworkProvider>();
+                        if (status.type == NetworkType.wifi) {
+                          provider.openWifiSettings();
+                        } else {
+                          provider.openMobileNetworkSettings();
+                        }
+                      },
+                    ),
+                    _ActionButton(
+                      width: itemWidth,
+                      icon: Icons.data_saver_on,
+                      label: '省流量',
+                      onTap: () => context
+                          .read<NetworkProvider>()
+                          .openDataSaverSettings(),
                     ),
                     _ActionButton(
                       width: itemWidth,

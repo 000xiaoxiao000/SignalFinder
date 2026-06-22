@@ -118,6 +118,7 @@ class _FinderSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _levelColor(best?.level ?? 0);
+    final isWifi = best?.isWifi ?? false;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -126,7 +127,8 @@ class _FinderSummary extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.explore, color: color, size: 36),
+                Icon(isWifi ? Icons.wifi : Icons.explore,
+                    color: color, size: 36),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -137,9 +139,11 @@ class _FinderSummary extends StatelessWidget {
                             ? '正在刷新信号'
                             : best == null
                                 ? '等待小区信息'
-                                : hasFallbackOnly
-                                    ? '当前信号概览 · ${best!.strengthLabel}'
-                                    : '${best!.radio} · ${best!.strengthLabel}',
+                                : isWifi
+                                    ? 'Wi-Fi · ${best!.strengthLabel}'
+                                    : hasFallbackOnly
+                                        ? '当前信号概览 · ${best!.strengthLabel}'
+                                        : '${best!.radio} · ${best!.strengthLabel}',
                         style: Theme.of(context)
                             .textTheme
                             .titleLarge
@@ -151,9 +155,11 @@ class _FinderSummary extends StatelessWidget {
                             ? '最多等待 $remainingSeconds 秒；超时会自动显示缓存或当前信号'
                             : best == null
                                 ? '刷新后会显示具体原因，不会一直无反馈'
-                                : hasFallbackOnly
-                                    ? '系统未开放小区列表，已回退显示当前信号强度'
-                                    : '当前可见 $count 个小区，优先看 dBm 更接近 0 的位置',
+                                : isWifi
+                                    ? '${best!.wifiSsid} · ${best!.wifiBand} · ${best!.dbm ?? '--'} dBm'
+                                    : hasFallbackOnly
+                                        ? '系统未开放小区列表，已回退显示当前信号强度'
+                                        : '当前可见 $count 个小区，优先看 dBm 更接近 0 的位置',
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
@@ -183,7 +189,7 @@ class _FinderSummary extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               refreshMessage.isEmpty
-                  ? '在车厢里缓慢移动、靠近车门或窗边后刷新，对比 dBm 和 level。这个功能是帮你找相对更好的位置，不会增强信号。'
+                  ? '移动网络可对比小区 dBm；Wi-Fi 可对比 RSSI、频段和链路速率。这个功能是帮你找相对更好的位置，不会增强信号。'
                   : refreshMessage,
               style: const TextStyle(
                   color: Colors.white70, fontSize: 13, height: 1.5),
@@ -219,6 +225,7 @@ class _CellSignalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _levelColor(signal.level);
+    final isWifi = signal.isWifi;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: isLocked
@@ -234,13 +241,15 @@ class _CellSignalCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.cell_tower, color: color),
+                Icon(isWifi ? Icons.wifi : Icons.cell_tower, color: color),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    signal.fallback
-                        ? '当前信号概览 · ${signal.radio}'
-                        : '${signal.displayName} · ${signal.radio}',
+                    isWifi
+                        ? '${signal.displayName} · ${signal.wifiSsid}'
+                        : signal.fallback
+                            ? '当前信号概览 · ${signal.radio}'
+                            : '${signal.displayName} · ${signal.radio}',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -276,7 +285,9 @@ class _CellSignalCard extends StatelessWidget {
             if (isLocked) ...[
               const SizedBox(height: 8),
               Text(
-                '已锁定观测：刷新后会优先帮你跟踪这个小区/信号对象。普通 App 不能强制手机连接指定基站。',
+                isWifi
+                    ? '已锁定观测：刷新后优先对比这个 Wi-Fi 接入点。普通 App 不能强制路由器改变发射功率。'
+                    : '已锁定观测：刷新后会优先帮你跟踪这个小区/信号对象。普通 App 不能强制手机连接指定基站。',
                 style: TextStyle(color: color, fontSize: 12, height: 1.4),
               ),
             ],
@@ -301,20 +312,31 @@ class _CellSignalCard extends StatelessWidget {
                 style: TextStyle(color: color, fontSize: 12, height: 1.4),
               ),
             ],
+            if (isWifi) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Wi-Fi 距离由 RSSI、频段、链路速率和路径损耗模型估算，已按范围显示。墙体、人体遮挡、路由器功率和反射会带来明显误差，只适合比较相对远近。',
+                style: TextStyle(color: color, fontSize: 12, height: 1.4),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
                   child: _SignalMetric(
-                    label: 'dBm',
+                    label: isWifi ? 'RSSI' : 'dBm',
                     value: _formatValue(signal.dbm),
                     color: color,
                   ),
                 ),
                 Expanded(
                   child: _SignalMetric(
-                    label: 'ASU',
-                    value: _formatValue(signal.asu),
+                    label: isWifi ? '链路速率' : 'ASU',
+                    value: isWifi
+                        ? signal.wifiLinkSpeedMbps == null
+                            ? '--'
+                            : '${signal.wifiLinkSpeedMbps}M'
+                        : _formatValue(signal.asu),
                     color: color,
                   ),
                 ),
@@ -331,15 +353,37 @@ class _CellSignalCard extends StatelessWidget {
             Wrap(
               spacing: 12,
               runSpacing: 8,
-              children: [
-                _ChipText(label: '运营商', value: signal.operatorName),
-                _ChipText(label: 'PCI', value: _formatValue(signal.pci)),
-                _ChipText(label: 'TAC/LAC', value: _formatValue(signal.tac)),
-                _ChipText(label: 'CI/NCI', value: _formatValue(signal.ci)),
-                _ChipText(label: '频点', value: _formatValue(signal.arfcn)),
-                _ChipText(label: '基站距离', value: signal.distanceLabel),
-                _ChipText(label: '距离算法', value: signal.distanceMethod),
-              ],
+              children: isWifi
+                  ? [
+                      _ChipText(label: 'SSID', value: signal.wifiSsid),
+                      _ChipText(label: 'BSSID', value: signal.wifiBssid),
+                      _ChipText(label: '频段', value: signal.wifiBand),
+                      _ChipText(
+                        label: '频率',
+                        value: signal.wifiFrequencyMhz == null
+                            ? '--'
+                            : '${signal.wifiFrequencyMhz} MHz',
+                      ),
+                      _ChipText(label: '标准', value: signal.wifiStandard),
+                      _ChipText(
+                        label: 'Tx/Rx',
+                        value:
+                            '${signal.wifiTxLinkSpeedMbps ?? '--'}/${signal.wifiRxLinkSpeedMbps ?? '--'} Mbps',
+                      ),
+                      _ChipText(label: '估算距离', value: signal.distanceLabel),
+                      _ChipText(label: '距离算法', value: signal.distanceMethod),
+                    ]
+                  : [
+                      _ChipText(label: '运营商', value: signal.operatorName),
+                      _ChipText(label: 'PCI', value: _formatValue(signal.pci)),
+                      _ChipText(
+                          label: 'TAC/LAC', value: _formatValue(signal.tac)),
+                      _ChipText(
+                          label: 'CI/NCI', value: _formatValue(signal.ci)),
+                      _ChipText(label: '频点', value: _formatValue(signal.arfcn)),
+                      _ChipText(label: '基站距离', value: signal.distanceLabel),
+                      _ChipText(label: '距离算法', value: signal.distanceMethod),
+                    ],
             ),
           ],
         ),
@@ -419,7 +463,25 @@ class _GlossaryCard extends StatelessWidget {
         children: [
           _GlossaryItem(
             term: 'dBm',
-            detail: '信号功率，通常是负数，越接近 0 越强。例如 -75 dBm 通常比 -105 dBm 好。',
+            detail: '信号功率，通常是负数，越接近 0 越强。移动网络和 Wi-Fi RSSI 都可用这个直观比较。',
+          ),
+          _GlossaryItem(
+            term: 'Wi-Fi RSSI',
+            detail:
+                'Wi-Fi 接收信号强度。一般 -55 dBm 以上很好，-67 dBm 左右稳定可用，低于 -75 dBm 容易卡顿。',
+          ),
+          _GlossaryItem(
+            term: 'SSID/BSSID',
+            detail:
+                'SSID 是 Wi-Fi 名称；BSSID 是当前接入点 MAC，同名 Wi-Fi 下可用它判断是否漫游到另一个 AP。',
+          ),
+          _GlossaryItem(
+            term: '2.4/5/6GHz',
+            detail: '2.4GHz 覆盖远但干扰多；5GHz/6GHz 速度和延迟通常更好，但穿墙和距离更敏感。',
+          ),
+          _GlossaryItem(
+            term: 'Wi-Fi 距离',
+            detail: '基于 RSSI、频段、链路速率和路径损耗估算，显示为范围。室内多径、墙体和路由器发射功率会让误差明显变大。',
           ),
           _GlossaryItem(
             term: 'ASU',
@@ -510,7 +572,7 @@ class _EmptyCellState extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.all(20),
         child: Text(
-          '没有读到小区信息。请确认已允许“电话”和“位置”权限，系统位置信息开关已打开，并正在使用移动网络；部分系统会限制邻近小区数据。',
+          '没有读到信号信息。移动网络请确认已允许“电话”和“位置”权限；Wi-Fi 请确认已连接 Wi-Fi、允许位置权限并打开系统定位开关。部分系统会限制邻近小区或 Wi-Fi 详情。',
           style: TextStyle(color: Colors.white70, height: 1.5),
         ),
       ),

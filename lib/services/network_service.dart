@@ -149,12 +149,11 @@ class NetworkService {
     if (!Platform.isAndroid) return const [];
 
     try {
+      await Permission.locationWhenInUse.request();
       final phoneStatus = await Permission.phone.request();
       if (!phoneStatus.isGranted) {
-        throw Exception('需要允许“电话”权限后才能读取移动网络制式和小区信息');
+        _logs.warning('未授予电话权限，将只尝试读取 Wi-Fi 或系统允许的信号信息');
       }
-
-      await Permission.locationWhenInUse.request();
 
       final result = await _mobileNetworkChannel
           .invokeMethod<List<dynamic>>('getCellSignals');
@@ -228,7 +227,29 @@ class NetworkService {
     required int count,
     required Duration delay,
   }) async {
+    final result = await _sampleTcpConnectivity(count: count, delay: delay);
+    return (
+      pingMs: result.pingMs,
+      packetLossPercent: result.packetLossPercent,
+    );
+  }
+
+  Future<
+      ({
+        int pingMs,
+        double packetLossPercent,
+        int jitterMs,
+        int consecutiveFailures,
+        bool hadFailureBeforeSuccess,
+      })> _sampleTcpConnectivity({
+    required int count,
+    required Duration delay,
+  }) async {
     final latencies = <int>[];
+    int consecutiveFailures = 0;
+    int maxConsecutiveFailures = 0;
+    bool hadFailure = false;
+    bool hadFailureBeforeSuccess = false;
     for (int i = 0; i < count; i++) {
       try {
         final start = DateTime.now();
@@ -240,7 +261,14 @@ class NetworkService {
         final elapsed = DateTime.now().difference(start).inMilliseconds;
         socket.destroy();
         latencies.add(elapsed);
+        if (hadFailure) hadFailureBeforeSuccess = true;
+        consecutiveFailures = 0;
       } catch (e, stack) {
+        hadFailure = true;
+        consecutiveFailures += 1;
+        if (consecutiveFailures > maxConsecutiveFailures) {
+          maxConsecutiveFailures = consecutiveFailures;
+        }
         _logs.warning('TCP 探测第 ${i + 1} 次失败', e, stack);
       }
       if (i < count - 1) {
@@ -249,14 +277,35 @@ class NetworkService {
     }
     final packetLoss = ((count - latencies.length) / count * 100).toDouble();
     if (latencies.isEmpty) {
-      return (pingMs: -1, packetLossPercent: packetLoss);
+      return (
+        pingMs: -1,
+        packetLossPercent: packetLoss,
+        jitterMs: 0,
+        consecutiveFailures: maxConsecutiveFailures,
+        hadFailureBeforeSuccess: false,
+      );
     }
     final stableLatencies = latencies.toList()..sort();
     if (stableLatencies.length > 2) stableLatencies.removeLast();
     final pingMs =
         (stableLatencies.reduce((a, b) => a + b) / stableLatencies.length)
             .round();
-    return (pingMs: pingMs, packetLossPercent: packetLoss);
+    return (
+      pingMs: pingMs,
+      packetLossPercent: packetLoss,
+      jitterMs: _calculateJitter(latencies),
+      consecutiveFailures: maxConsecutiveFailures,
+      hadFailureBeforeSuccess: hadFailureBeforeSuccess,
+    );
+  }
+
+  int _calculateJitter(List<int> latencies) {
+    if (latencies.length < 2) return 0;
+    var totalDiff = 0;
+    for (int i = 1; i < latencies.length; i++) {
+      totalDiff += (latencies[i] - latencies[i - 1]).abs();
+    }
+    return (totalDiff / (latencies.length - 1)).round();
   }
 
   Future<int> measurePing() async {
@@ -319,20 +368,36 @@ class NetworkService {
       return NetworkStatus.empty();
     }
 
-    final connectivity = await _measureTcpConnectivity(
+    final connectivity = await _sampleTcpConnectivity(
       count: _pingCount,
       delay: const Duration(milliseconds: 200),
     );
     final pingMs = connectivity.pingMs;
     final packetLoss = connectivity.packetLossPercent;
     final signal = inferSignalStrength(pingMs, packetLoss);
-    final downloadSpeed = await measureDownloadSpeed();
+    final shouldSkipSpeedTest = pingMs < 0 || packetLoss >= 30 || pingMs > 600;
+    final downloadSpeed =
+        shouldSkipSpeedTest ? 0.0 : await measureDownloadSpeed();
+    if (shouldSkipSpeedTest) {
+      _logs.warning('网络抖动或丢包较高，跳过下载测速以减少带宽占用');
+    }
+    final stability = _inferStability(
+      pingMs: pingMs,
+      packetLoss: packetLoss,
+      jitterMs: connectivity.jitterMs,
+      consecutiveFailures: connectivity.consecutiveFailures,
+      hadFailureBeforeSuccess: connectivity.hadFailureBeforeSuccess,
+    );
 
     final status = NetworkStatus(
       timestamp: DateTime.now(),
       type: type,
       signal: signal,
       pingMs: pingMs < 0 ? 0 : pingMs,
+      jitterMs: stability.jitterMs,
+      consecutiveFailures: stability.consecutiveFailures,
+      stabilityScore: stability.score,
+      stabilityState: stability.state,
       downloadSpeedMbps: downloadSpeed,
       packetLossPercent: packetLoss,
       dnsLatencyMs: '--',
@@ -353,19 +418,30 @@ class NetworkService {
       return NetworkStatus.empty();
     }
 
-    final connectivity = await _measureTcpConnectivity(
+    final connectivity = await _sampleTcpConnectivity(
       count: _quickPingCount,
       delay: const Duration(milliseconds: 150),
     );
     final pingMs = connectivity.pingMs;
     final packetLoss = connectivity.packetLossPercent;
     final signal = inferSignalStrength(pingMs, packetLoss);
+    final stability = _inferStability(
+      pingMs: pingMs,
+      packetLoss: packetLoss,
+      jitterMs: connectivity.jitterMs,
+      consecutiveFailures: connectivity.consecutiveFailures,
+      hadFailureBeforeSuccess: connectivity.hadFailureBeforeSuccess,
+    );
 
     final status = NetworkStatus(
       timestamp: DateTime.now(),
       type: type,
       signal: signal,
       pingMs: pingMs < 0 ? 0 : pingMs,
+      jitterMs: stability.jitterMs,
+      consecutiveFailures: stability.consecutiveFailures,
+      stabilityScore: stability.score,
+      stabilityState: stability.state,
       downloadSpeedMbps: 0,
       packetLossPercent: packetLoss,
       dnsLatencyMs: '--',
@@ -375,5 +451,70 @@ class NetworkService {
       '快速网络检测完成：ping=${status.pingMs}ms, 丢包=${status.packetLossPercent.toStringAsFixed(0)}%',
     );
     return status;
+  }
+
+  ({
+    int score,
+    int jitterMs,
+    int consecutiveFailures,
+    NetworkStabilityState state,
+  }) _inferStability({
+    required int pingMs,
+    required double packetLoss,
+    required int jitterMs,
+    required int consecutiveFailures,
+    required bool hadFailureBeforeSuccess,
+  }) {
+    var score = 100;
+    if (pingMs < 0) {
+      return (
+        score: 0,
+        jitterMs: jitterMs,
+        consecutiveFailures: consecutiveFailures,
+        state: NetworkStabilityState.likelyDrop,
+      );
+    }
+    if (pingMs > 300) {
+      score -= 25;
+    } else if (pingMs > 150) {
+      score -= 12;
+    }
+    if (jitterMs > 120) {
+      score -= 25;
+    } else if (jitterMs > 50) {
+      score -= 12;
+    }
+    if (packetLoss >= 30) {
+      score -= 35;
+    } else if (packetLoss >= 10) {
+      score -= 18;
+    }
+    if (consecutiveFailures >= 2) {
+      score -= 25;
+    } else if (consecutiveFailures == 1) {
+      score -= 10;
+    }
+
+    NetworkStabilityState state;
+    if (consecutiveFailures >= 2 || packetLoss >= 70) {
+      state = NetworkStabilityState.likelyDrop;
+    } else if (hadFailureBeforeSuccess) {
+      state = NetworkStabilityState.recovering;
+    } else if (packetLoss >= 20) {
+      state = NetworkStabilityState.highLoss;
+    } else if (pingMs > 220 && packetLoss > 5) {
+      state = NetworkStabilityState.congested;
+    } else if (jitterMs > 50 || packetLoss >= 10 || pingMs > 150) {
+      state = NetworkStabilityState.slightJitter;
+    } else {
+      state = NetworkStabilityState.stable;
+    }
+
+    return (
+      score: score.clamp(0, 100),
+      jitterMs: jitterMs,
+      consecutiveFailures: consecutiveFailures,
+      state: state,
+    );
   }
 }

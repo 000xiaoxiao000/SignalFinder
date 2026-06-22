@@ -10,6 +10,7 @@ import android.net.ConnectivityManager
 import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.net.VpnService
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
@@ -484,6 +485,8 @@ class MainActivity : FlutterActivity() {
                 highPerfWifiLock = null
             }
             highPerfWifiLock?.isHeld == true
+        }.onFailure {
+            Log.e(tag, "Failed to set high performance Wi-Fi lock enabled=$enabled", it)
         }.getOrDefault(false)
     }
 
@@ -510,7 +513,10 @@ class MainActivity : FlutterActivity() {
                             if (!completed) {
                                 completed = true
                                 handler.removeCallbacks(timeout)
-                                result.success(mapCellSignals(cellInfo, telephonyManager))
+                                result.success(
+                                    mapCellSignals(cellInfo, telephonyManager)
+                                        .withCurrentWifiSignal("已同时读取当前 Wi-Fi 和移动小区信号")
+                                )
                             }
                         }
 
@@ -554,6 +560,178 @@ class MainActivity : FlutterActivity() {
                 )
             }
         }.getOrDefault(emptyList())
+            .withCurrentWifiSignal("已读取当前 Wi-Fi 信号；移动小区信息可能受系统权限限制")
+    }
+
+    private fun List<Map<String, Any?>>.withCurrentWifiSignal(
+        refreshNote: String
+    ): List<Map<String, Any?>> {
+        val wifiSignal = getCurrentWifiSignal(refreshNote)
+        return if (wifiSignal == null) this else listOf(wifiSignal) + this
+    }
+
+    private fun getCurrentWifiSignal(refreshNote: String): Map<String, Any?>? {
+        return runCatching {
+            val wifiManager =
+                applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val info = wifiManager.connectionInfo ?: return@runCatching null
+            val ssid = normalizeWifiString(info.ssid)
+            val bssid = normalizeWifiString(info.bssid)
+            val frequency = info.frequency
+            val rssi = info.rssi
+            if (ssid.isEmpty() || ssid == "<unknown ssid>" || frequency <= 0 || rssi <= -127) {
+                return@runCatching null
+            }
+
+            mapOf(
+                "radio" to "Wi-Fi",
+                "registered" to true,
+                "level" to wifiSignalLevel(rssi),
+                "dbm" to rssi,
+                "asu" to null,
+                "ci" to bssid.ifEmpty { null },
+                "tac" to null,
+                "pci" to null,
+                "arfcn" to frequency,
+                "operatorName" to ssid,
+                "distanceLabel" to wifiDistanceLabel(rssi, frequency, info.linkSpeed),
+                "distanceMethod" to "Wi-Fi RSSI路径损耗",
+                "refreshNote" to refreshNote,
+                "fallback" to false,
+                "estimatedDistanceMeters" to estimateWifiDistanceMeters(rssi, frequency, info.linkSpeed)?.roundToInt(),
+                "isWifi" to true,
+                "wifiSsid" to ssid,
+                "wifiBssid" to bssid,
+                "wifiBand" to wifiBand(frequency),
+                "wifiFrequencyMhz" to frequency,
+                "wifiLinkSpeedMbps" to info.linkSpeed,
+                "wifiTxLinkSpeedMbps" to wifiTxLinkSpeed(info),
+                "wifiRxLinkSpeedMbps" to wifiRxLinkSpeed(info),
+                "wifiStandard" to wifiStandardLabel(info),
+            )
+        }.getOrNull()
+    }
+
+    private fun normalizeWifiString(value: String?): String {
+        return value?.trim('"').orEmpty()
+    }
+
+    private fun wifiSignalLevel(rssi: Int): Int {
+        @Suppress("DEPRECATION")
+        return WifiManager.calculateSignalLevel(rssi, 5).coerceIn(0, 4)
+    }
+
+    private fun wifiBand(frequencyMhz: Int): String {
+        return when {
+            frequencyMhz >= 5925 -> "6GHz"
+            frequencyMhz > 4900 -> "5GHz"
+            frequencyMhz > 2400 -> "2.4GHz"
+            else -> "未知"
+        }
+    }
+
+    private fun wifiQualityLabel(rssi: Int, frequencyMhz: Int): String {
+        return when {
+            rssi >= -55 -> "${wifiBand(frequencyMhz)} · 信号很强"
+            rssi >= -67 -> "${wifiBand(frequencyMhz)} · 稳定可用"
+            rssi >= -75 -> "${wifiBand(frequencyMhz)} · 边缘可用"
+            else -> "${wifiBand(frequencyMhz)} · 信号较弱"
+        }
+    }
+
+    private fun wifiDistanceLabel(rssi: Int, frequencyMhz: Int, linkSpeedMbps: Int): String {
+        val distance = estimateWifiDistanceMeters(rssi, frequencyMhz, linkSpeedMbps)
+            ?: return wifiQualityLabel(rssi, frequencyMhz)
+        val lower = (distance * 0.55).coerceAtLeast(0.5)
+        val upper = (distance * wifiUncertaintyFactor(rssi, linkSpeedMbps)).coerceAtLeast(lower + 0.8)
+        val quality = when {
+            upper <= 3 -> "很近"
+            upper <= 8 -> "较近"
+            upper <= 15 -> "中等"
+            else -> "较远/可能隔墙"
+        }
+        return "${formatMeters(lower)}-${formatMeters(upper)} · $quality"
+    }
+
+    private fun estimateWifiDistanceMeters(
+        rssi: Int,
+        frequencyMhz: Int,
+        linkSpeedMbps: Int
+    ): Double? {
+        if (rssi !in -100..-20 || frequencyMhz <= 0) return null
+        val frequencyGhz = frequencyMhz / 1000.0
+        val fsplDistance = 10.0.pow((27.55 - 20.0 * kotlin.math.log10(frequencyMhz.toDouble()) - rssi) / 20.0)
+        val indoorReferenceRssiAt1m = when {
+            frequencyMhz >= 5925 -> -48.0
+            frequencyMhz > 4900 -> -46.0
+            frequencyMhz > 2400 -> -41.0
+            else -> -43.0
+        }
+        val indoorPathLossExponent = when {
+            frequencyMhz >= 5925 -> 3.4
+            frequencyMhz > 4900 -> 3.1
+            frequencyMhz > 2400 -> 2.4
+            else -> 2.8
+        }
+        val indoorDistance =
+            10.0.pow((indoorReferenceRssiAt1m - rssi) / (10.0 * indoorPathLossExponent))
+        val rssiWeight = when {
+            rssi >= -55 -> 0.35
+            rssi >= -67 -> 0.5
+            else -> 0.65
+        }
+        val blended = fsplDistance * (1.0 - rssiWeight) + indoorDistance * rssiWeight
+        val corrected = blended * wifiLinkSpeedCorrection(linkSpeedMbps, frequencyGhz)
+        return corrected.coerceIn(0.5, 80.0)
+    }
+
+    private fun wifiLinkSpeedCorrection(linkSpeedMbps: Int, frequencyGhz: Double): Double {
+        if (linkSpeedMbps <= 0) return 1.0
+        val highSpeed = if (frequencyGhz >= 5.0) 866 else 300
+        val mediumSpeed = if (frequencyGhz >= 5.0) 300 else 144
+        return when {
+            linkSpeedMbps >= highSpeed -> 0.75
+            linkSpeedMbps >= mediumSpeed -> 0.9
+            linkSpeedMbps < 72 -> 1.35
+            else -> 1.0
+        }
+    }
+
+    private fun wifiUncertaintyFactor(rssi: Int, linkSpeedMbps: Int): Double {
+        return when {
+            rssi >= -55 && linkSpeedMbps >= 300 -> 1.5
+            rssi >= -67 -> 1.9
+            rssi >= -75 -> 2.3
+            else -> 2.8
+        }
+    }
+
+    private fun wifiTxLinkSpeed(info: WifiInfo): Int? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.txLinkSpeedMbps.takeIf { it > 0 }
+        } else {
+            null
+        }
+    }
+
+    private fun wifiRxLinkSpeed(info: WifiInfo): Int? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.rxLinkSpeedMbps.takeIf { it > 0 }
+        } else {
+            null
+        }
+    }
+
+    private fun wifiStandardLabel(info: WifiInfo): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "未知"
+        return when (info.wifiStandard) {
+            4 -> "Wi-Fi 4"
+            5 -> "Wi-Fi 5"
+            6 -> "Wi-Fi 6/6E"
+            7 -> "WiGig"
+            8 -> "Wi-Fi 7"
+            else -> "未知"
+        }
     }
 
     private fun mapCellSignals(
@@ -1109,86 +1287,67 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun openMobileNetworkSettings() {
-        val intent = Intent(Settings.ACTION_DATA_ROAMING_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure {
-                startActivity(
-                    Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                )
-            }
+        val intents = listOf(
+            Intent(Settings.ACTION_NETWORK_OPERATOR_SETTINGS),
+            Intent(Settings.ACTION_DATA_ROAMING_SETTINGS),
+            Intent(Settings.ACTION_WIRELESS_SETTINGS),
+        )
+        openFirstAvailableSettings(intents)
     }
 
     private fun openWifiSettings() {
-        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure {
-                startActivity(
-                    Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                )
-            }
+        openFirstAvailableSettings(
+            listOf(
+                Intent(Settings.ACTION_WIFI_SETTINGS),
+                Intent(Settings.ACTION_WIRELESS_SETTINGS),
+            )
+        )
     }
 
     private fun openDataSaverSettings() {
-        val intent = Intent("android.settings.DATA_SAVER_SETTINGS").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure {
-                startActivity(
-                    Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                )
-            }
+        openFirstAvailableSettings(
+            listOf(
+                Intent("android.settings.DATA_SAVER_SETTINGS"),
+                Intent(Settings.ACTION_WIRELESS_SETTINGS),
+            )
+        )
     }
 
     private fun openManageApplicationsSettings() {
-        val intent = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure {
-                startActivity(
-                    Intent(Settings.ACTION_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                )
-            }
+        openFirstAvailableSettings(
+            listOf(
+                Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS),
+            )
+        )
     }
 
     private fun openVpnSettings() {
-        val intent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure {
-                startActivity(
-                    Intent(Settings.ACTION_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                )
-            }
+        openFirstAvailableSettings(
+            listOf(
+                Intent(Settings.ACTION_VPN_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS),
+            )
+        )
     }
 
     private fun openUsageAccessSettings() {
-        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { startActivity(intent) }
-            .onFailure {
-                startActivity(
-                    Intent(Settings.ACTION_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                )
+        openFirstAvailableSettings(
+            listOf(
+                Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS),
+            )
+        )
+    }
+
+    private fun openFirstAvailableSettings(intents: List<Intent>) {
+        for (intent in intents) {
+            val launchIntent = intent.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            if (runCatching { startActivity(launchIntent) }.isSuccess) {
+                return
+            }
+        }
     }
 }

@@ -430,10 +430,9 @@ class _TipCard extends StatelessWidget {
                     style: const TextStyle(
                         color: Colors.white70, fontSize: 13, height: 1.5),
                   ),
-                  if (tip.action ==
-                      DiagnosisTipAction.temporaryBackgroundRefreshPause) ...[
+                  if (tip.action != null) ...[
                     const SizedBox(height: 12),
-                    const _TemporaryPauseControls(),
+                    _TipActionButton(action: tip.action!),
                   ],
                 ],
               ),
@@ -445,23 +444,77 @@ class _TipCard extends StatelessWidget {
   }
 }
 
-class _TemporaryPauseControls extends StatelessWidget {
-  const _TemporaryPauseControls();
+class _TipActionButton extends StatelessWidget {
+  final DiagnosisTipAction action;
+
+  const _TipActionButton({required this.action});
+
+  String get _label {
+    switch (action) {
+      case DiagnosisTipAction.openNetworkTuning:
+      case DiagnosisTipAction.temporaryBackgroundRefreshPause:
+        return '打开网络调优';
+      case DiagnosisTipAction.openWifiSettings:
+        return '打开 Wi-Fi 设置';
+      case DiagnosisTipAction.openMobileNetworkSettings:
+        return '打开移动网络设置';
+      case DiagnosisTipAction.openDataSaverSettings:
+        return '打开省流量设置';
+      case DiagnosisTipAction.openUsageAccessSettings:
+        return '去授权流量统计';
+    }
+  }
+
+  IconData get _icon {
+    switch (action) {
+      case DiagnosisTipAction.openNetworkTuning:
+      case DiagnosisTipAction.temporaryBackgroundRefreshPause:
+        return Icons.tune;
+      case DiagnosisTipAction.openWifiSettings:
+        return Icons.wifi;
+      case DiagnosisTipAction.openMobileNetworkSettings:
+        return Icons.signal_cellular_alt;
+      case DiagnosisTipAction.openDataSaverSettings:
+        return Icons.data_saver_on;
+      case DiagnosisTipAction.openUsageAccessSettings:
+        return Icons.admin_panel_settings_outlined;
+    }
+  }
+
+  void _run(BuildContext context) {
+    final provider = context.read<NetworkProvider>();
+    switch (action) {
+      case DiagnosisTipAction.openNetworkTuning:
+      case DiagnosisTipAction.temporaryBackgroundRefreshPause:
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const NetworkTuningScreen(),
+          ),
+        );
+        return;
+      case DiagnosisTipAction.openWifiSettings:
+        provider.openWifiSettings();
+        return;
+      case DiagnosisTipAction.openMobileNetworkSettings:
+        provider.openMobileNetworkSettings();
+        return;
+      case DiagnosisTipAction.openDataSaverSettings:
+        provider.openDataSaverSettings();
+        return;
+      case DiagnosisTipAction.openUsageAccessSettings:
+        provider.openUsageAccessSettings();
+        return;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => const NetworkTuningScreen(),
-            ),
-          );
-        },
-        icon: const Icon(Icons.vpn_lock),
-        label: const Text('打开网络调优'),
+        onPressed: () => _run(context),
+        icon: Icon(_icon),
+        label: Text(_label),
       ),
     );
   }

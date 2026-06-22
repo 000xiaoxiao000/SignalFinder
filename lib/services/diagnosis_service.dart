@@ -9,6 +9,8 @@ enum DiagnosisIssue {
   noConnection,
   unstableConnection,
   crowdedNetwork,
+  highJitter,
+  likelyDrop,
   ok,
 }
 
@@ -66,7 +68,14 @@ class DiagnosisTip {
 
 enum TipPriority { high, medium, low }
 
-enum DiagnosisTipAction { temporaryBackgroundRefreshPause }
+enum DiagnosisTipAction {
+  openNetworkTuning,
+  openWifiSettings,
+  openMobileNetworkSettings,
+  openDataSaverSettings,
+  openUsageAccessSettings,
+  temporaryBackgroundRefreshPause,
+}
 
 class DiagnosisService {
   DiagnosisResult diagnose(
@@ -85,12 +94,14 @@ class DiagnosisService {
             title: '检查飞行模式',
             detail: '确认手机没有开启飞行模式，移动数据已打开。',
             priority: TipPriority.high,
+            action: DiagnosisTipAction.openMobileNetworkSettings,
           ),
           DiagnosisTip(
             icon: '🔄',
             title: '重启网络',
             detail: '关闭再打开移动数据，或切换到 WiFi。',
             priority: TipPriority.high,
+            action: DiagnosisTipAction.openWifiSettings,
           ),
         ],
       );
@@ -143,6 +154,54 @@ class DiagnosisService {
       ));
     }
 
+    // Stability check
+    if (status.stabilityState == NetworkStabilityState.likelyDrop) {
+      issues.add(DiagnosisIssue.likelyDrop);
+      score -= 25;
+      tips.add(const DiagnosisTip(
+        icon: '⛔',
+        title: '疑似短时断流',
+        detail: '连续探测失败或丢包过高。建议先停止测速和下载，再检查移动数据、Wi-Fi 或省流量限制。',
+        priority: TipPriority.high,
+        action: DiagnosisTipAction.openDataSaverSettings,
+      ));
+    } else if (status.stabilityState == NetworkStabilityState.recovering) {
+      issues.add(DiagnosisIssue.unstableConnection);
+      score -= 10;
+      tips.add(const DiagnosisTip(
+        icon: '↗',
+        title: '网络正在恢复',
+        detail: '刚出现过失败探测，建议短时间内不要启动大文件下载或测速，等待连接稳定。',
+        priority: TipPriority.medium,
+      ));
+    }
+
+    if (status.jitterMs > 120) {
+      issues.add(DiagnosisIssue.highJitter);
+      score -= 20;
+      tips.add(DiagnosisTip(
+        icon: '〽',
+        title: '抖动很高',
+        detail: status.type == NetworkType.wifi
+            ? '延迟波动超过 120ms，实时连接容易卡顿。建议开启 Wi-Fi 高性能锁、靠近路由器或切换到移动网络。'
+            : '延迟波动超过 120ms，移动网络可能正在小区切换或拥塞。建议换位置，必要时进入移动网络设置调整 5G/4G 偏好。',
+        priority: TipPriority.high,
+        action: status.type == NetworkType.wifi
+            ? DiagnosisTipAction.openNetworkTuning
+            : DiagnosisTipAction.openMobileNetworkSettings,
+      ));
+    } else if (status.jitterMs > 50) {
+      issues.add(DiagnosisIssue.highJitter);
+      score -= 10;
+      tips.add(const DiagnosisTip(
+        icon: '〽',
+        title: '存在延迟抖动',
+        detail: '当前平均延迟不一定很高，但波动较明显。建议关闭后台下载、同步和自动更新。',
+        priority: TipPriority.medium,
+        action: DiagnosisTipAction.openNetworkTuning,
+      ));
+    }
+
     // Speed check
     if (status.downloadSpeedMbps > 0 && status.downloadSpeedMbps < 1) {
       issues.add(DiagnosisIssue.slowSpeed);
@@ -168,6 +227,7 @@ class DiagnosisService {
         detail:
             '综合判断当前可能在地铁、商场等人密集区域，基站超载导致网速下降。\n建议：①提前缓存内容；②切换到 4G（关闭 5G）；③优选更快的 DNS。',
         priority: TipPriority.high,
+        action: DiagnosisTipAction.openMobileNetworkSettings,
       ));
     }
 
@@ -185,16 +245,16 @@ class DiagnosisService {
         title: '尝试切换到 4G',
         detail: '5G 在地下或人群中穿透力差。进入手机设置 → 移动网络 → 首选网络类型，选择 LTE/4G。',
         priority: TipPriority.medium,
+        action: DiagnosisTipAction.openMobileNetworkSettings,
       ));
     }
 
     tips.add(const DiagnosisTip(
       icon: '🔄',
-      title: '开启 App 联网白名单',
-      detail:
-          '在网络调优里选择当前需要联网的 App，开启本地 VPN 白名单后，其它 App 会被临时拦截，把带宽留给当前任务。用完后记得关闭白名单。',
+      title: '减少后台网络干扰',
+      detail: '进入网络调优查看高流量应用、Wi-Fi 高性能锁、省流量和系统网络入口。弱网时先停止后台下载、同步和自动更新。',
       priority: TipPriority.low,
-      action: DiagnosisTipAction.temporaryBackgroundRefreshPause,
+      action: DiagnosisTipAction.openNetworkTuning,
     ));
 
     String summary;

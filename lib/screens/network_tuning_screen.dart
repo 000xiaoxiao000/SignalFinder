@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/installed_app.dart';
+import '../models/network_status.dart';
 import '../providers/network_provider.dart';
 import 'advanced_mode_screen.dart';
 
@@ -26,7 +27,9 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
     return Consumer<NetworkProvider>(
       builder: (context, provider, _) {
         final status = provider.tuningStatus;
+        final networkStatus = provider.currentStatus;
         final isLoading = provider.tuningState == MeasurementState.measuring;
+        final isWifiConnected = networkStatus.type == NetworkType.wifi;
 
         return Scaffold(
           appBar: AppBar(
@@ -63,6 +66,8 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _DirectActionsPanel(status: provider.currentStatus),
+              const SizedBox(height: 18),
               _SectionHeader(
                 icon: Icons.wifi,
                 title: 'Wi-Fi 调优',
@@ -83,12 +88,18 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
               ),
               _TuningCard(
                 title: 'Wi-Fi 高性能锁',
-                capability: status.highPerfWifiLockHeld ? '已开启' : '可直接开启',
-                detail:
-                    '关键传输时保持 Wi-Fi 高吞吐模式，减少系统休眠或省电影响。会增加耗电，建议只在测速、下载、视频会议时开启。',
+                capability: isWifiConnected
+                    ? status.highPerfWifiLockHeld
+                        ? '已开启'
+                        : '可直接开启'
+                    : '移动网络不适用',
+                detail: isWifiConnected
+                    ? '关键传输时保持 Wi-Fi 高吞吐模式，减少系统休眠或省电影响。会增加耗电，建议只在测速、下载、视频会议时开启。'
+                    : '当前使用的是 ${networkStatus.networkTypeName}，Wi-Fi 高性能锁不会改善移动网络稳定性。移动网络请优先检查省流量、后台占网和 5G/4G 偏好。',
                 trailing: Switch(
                   value: status.highPerfWifiLockHeld,
-                  onChanged: provider.setHighPerfWifiLock,
+                  onChanged:
+                      isWifiConnected ? provider.setHighPerfWifiLock : null,
                 ),
               ),
               _TuningCard(
@@ -168,6 +179,112 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
       },
     );
   }
+}
+
+class _DirectActionsPanel extends StatelessWidget {
+  final NetworkStatus status;
+
+  const _DirectActionsPanel({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.read<NetworkProvider>();
+    final primaryAction = status.type == NetworkType.wifi
+        ? _DirectAction(
+            icon: Icons.wifi,
+            label: 'Wi-Fi 设置',
+            onTap: provider.openWifiSettings,
+          )
+        : _DirectAction(
+            icon: Icons.signal_cellular_alt,
+            label: '移动网络',
+            onTap: provider.openMobileNetworkSettings,
+          );
+
+    final actions = [
+      primaryAction,
+      _DirectAction(
+        icon: Icons.data_saver_on,
+        label: '省流量',
+        onTap: provider.openDataSaverSettings,
+      ),
+      _DirectAction(
+        icon: Icons.apps,
+        label: '应用管理',
+        onTap: provider.openManageApplicationsSettings,
+      ),
+      _DirectAction(
+        icon: Icons.admin_panel_settings_outlined,
+        label: '流量授权',
+        onTap: provider.openUsageAccessSettings,
+      ),
+    ];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.bolt_outlined, color: Colors.lightBlueAccent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '当前网络快速处理',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+                _CapabilityBadge(label: status.stabilityLabel),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              status.stabilityAdvice,
+              style: const TextStyle(color: Colors.white70, height: 1.45),
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = (constraints.maxWidth - 8) / 2;
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: actions
+                      .map(
+                        (action) => SizedBox(
+                          width: width,
+                          child: FilledButton.tonalIcon(
+                            onPressed: action.onTap,
+                            icon: Icon(action.icon),
+                            label: Text(action.label),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DirectAction {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _DirectAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 }
 
 class _AppWhitelistVpnCard extends StatelessWidget {
