@@ -642,7 +642,7 @@ class MainActivity : FlutterActivity() {
     private fun wifiDistanceLabel(rssi: Int, frequencyMhz: Int, linkSpeedMbps: Int): String {
         val distance = estimateWifiDistanceMeters(rssi, frequencyMhz, linkSpeedMbps)
             ?: return wifiQualityLabel(rssi, frequencyMhz)
-        val lower = (distance * 0.55).coerceAtLeast(0.5)
+        val lower = (distance * 0.6).coerceAtLeast(0.5)
         val upper = (distance * wifiUncertaintyFactor(rssi, linkSpeedMbps)).coerceAtLeast(lower + 0.8)
         val quality = when {
             upper <= 3 -> "很近"
@@ -676,9 +676,9 @@ class MainActivity : FlutterActivity() {
         val indoorDistance =
             10.0.pow((indoorReferenceRssiAt1m - rssi) / (10.0 * indoorPathLossExponent))
         val rssiWeight = when {
-            rssi >= -55 -> 0.35
-            rssi >= -67 -> 0.5
-            else -> 0.65
+            rssi >= -55 -> 0.4
+            rssi >= -67 -> 0.55
+            else -> 0.7
         }
         val blended = fsplDistance * (1.0 - rssiWeight) + indoorDistance * rssiWeight
         val corrected = blended * wifiLinkSpeedCorrection(linkSpeedMbps, frequencyGhz)
@@ -690,19 +690,19 @@ class MainActivity : FlutterActivity() {
         val highSpeed = if (frequencyGhz >= 5.0) 866 else 300
         val mediumSpeed = if (frequencyGhz >= 5.0) 300 else 144
         return when {
-            linkSpeedMbps >= highSpeed -> 0.75
-            linkSpeedMbps >= mediumSpeed -> 0.9
-            linkSpeedMbps < 72 -> 1.35
+            linkSpeedMbps >= highSpeed -> 0.85
+            linkSpeedMbps >= mediumSpeed -> 0.95
+            linkSpeedMbps < 72 -> 1.2
             else -> 1.0
         }
     }
 
     private fun wifiUncertaintyFactor(rssi: Int, linkSpeedMbps: Int): Double {
         return when {
-            rssi >= -55 && linkSpeedMbps >= 300 -> 1.5
-            rssi >= -67 -> 1.9
-            rssi >= -75 -> 2.3
-            else -> 2.8
+            rssi >= -55 && linkSpeedMbps >= 300 -> 1.45
+            rssi >= -67 -> 1.8
+            rssi >= -75 -> 2.2
+            else -> 2.7
         }
     }
 
@@ -1058,26 +1058,50 @@ class MainActivity : FlutterActivity() {
     private fun formatSignalModelDistance(dbm: Int?, radio: String?): String {
         val distance = estimateDistanceFromSignal(dbm, radio)
             ?: return "信号不足，暂无法估算"
-        return "约 ${formatMeters(distance)} · 算法估算"
+        val factor = signalDistanceUncertaintyFactor(dbm ?: return "信号不足，暂无法估算")
+        val lower = (distance * 0.55).coerceAtLeast(20.0)
+        val upper = (distance * factor).coerceAtLeast(lower + 20.0).coerceAtMost(30000.0)
+        return "${formatMeters(lower)}-${formatMeters(upper)} · 参考范围"
     }
 
     private fun estimateDistanceFromSignal(dbm: Int?, radio: String?): Double? {
         if (!isUsableDbm(dbm)) return null
         val dbmValue = dbm ?: return null
-        val exponent = when {
+        val profile = signalDistanceProfile(radio)
+        val distance = profile.referenceDistanceMeters *
+            10.0.pow((profile.referenceDbm - dbmValue) / (10.0 * profile.pathLossExponent))
+        return distance.coerceIn(20.0, 30000.0)
+    }
+
+    private data class SignalDistanceProfile(
+        val referenceDbm: Int,
+        val referenceDistanceMeters: Double,
+        val pathLossExponent: Double,
+    )
+
+    private fun signalDistanceProfile(radio: String?): SignalDistanceProfile {
+        return when {
             radio?.contains("NR", ignoreCase = true) == true ||
-                radio?.contains("5G", ignoreCase = true) == true -> 3.4
+                radio?.contains("5G", ignoreCase = true) == true ->
+                SignalDistanceProfile(referenceDbm = -88, referenceDistanceMeters = 100.0, pathLossExponent = 3.6)
             radio?.contains("LTE", ignoreCase = true) == true ||
-                radio?.contains("4G", ignoreCase = true) == true -> 3.2
-            radio?.contains("GSM", ignoreCase = true) == true -> 3.7
-            radio?.contains("CDMA", ignoreCase = true) == true -> 3.5
+                radio?.contains("4G", ignoreCase = true) == true ->
+                SignalDistanceProfile(referenceDbm = -87, referenceDistanceMeters = 100.0, pathLossExponent = 3.3)
+            radio?.contains("GSM", ignoreCase = true) == true ->
+                SignalDistanceProfile(referenceDbm = -78, referenceDistanceMeters = 100.0, pathLossExponent = 3.8)
+            radio?.contains("CDMA", ignoreCase = true) == true ->
+                SignalDistanceProfile(referenceDbm = -82, referenceDistanceMeters = 100.0, pathLossExponent = 3.6)
+            else -> SignalDistanceProfile(referenceDbm = -87, referenceDistanceMeters = 100.0, pathLossExponent = 3.5)
+        }
+    }
+
+    private fun signalDistanceUncertaintyFactor(dbm: Int): Double {
+        return when {
+            dbm >= -85 -> 1.7
+            dbm >= -100 -> 2.2
+            dbm >= -115 -> 2.8
             else -> 3.4
         }
-        val referenceDbm = -85
-        val referenceDistanceMeters = 100.0
-        val distance = referenceDistanceMeters *
-            10.0.pow((referenceDbm - dbmValue) / (10.0 * exponent))
-        return distance.coerceIn(20.0, 30000.0)
     }
 
     private fun estimateDistanceFromRsrp(dbm: Int, tower: TowerPoint): Double {

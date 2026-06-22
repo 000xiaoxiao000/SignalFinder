@@ -222,6 +222,40 @@ class _CellSignalCard extends StatelessWidget {
 
   String _formatValue(Object? value) => value == null ? '--' : '$value';
 
+  String _signalInputLabel() {
+    final dbm = signal.dbm == null ? '--' : '${signal.dbm} dBm';
+    if (signal.isWifi) {
+      final frequency = signal.wifiFrequencyMhz == null
+          ? '--'
+          : '${signal.wifiFrequencyMhz} MHz';
+      final linkSpeed = signal.wifiLinkSpeedMbps == null
+          ? '--'
+          : '${signal.wifiLinkSpeedMbps} Mbps';
+      return 'RSSI $dbm · $frequency · 链路 $linkSpeed';
+    }
+    final radio = signal.radio.isEmpty ? '移动网络' : signal.radio;
+    return '$radio · dBm/RSRP $dbm';
+  }
+
+  String _distanceResultLabel() {
+    final meters = signal.estimatedDistanceMeters;
+    if (meters == null) return signal.distanceLabel;
+    return '${signal.distanceLabel} · 结果值 ${meters}m';
+  }
+
+  String _distanceHint() {
+    if (signal.distanceMethod == '加权最小二乘') {
+      return '基于多个已知基站点位和 RSRP 约束收敛出来的位置距离，不是运营商精确定位。';
+    }
+    if (signal.isWifi) {
+      return '输入值是当前连接 Wi-Fi 的 RSSI、频段和链路速率；结果按范围显示，只适合比较相对远近。';
+    }
+    if (signal.distanceMethod == '路径损耗算法') {
+      return '输入值是手机读到的 dBm/RSRP；结果是路径损耗模型估算范围，遮挡、反射和基站功率都会改变结果。';
+    }
+    return '信号或点位数据不足时，无法给出可靠的距离估算。';
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = _levelColor(signal.level);
@@ -320,6 +354,14 @@ class _CellSignalCard extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 14),
+            _DistanceEstimatePanel(
+              color: color,
+              input: _signalInputLabel(),
+              method: signal.distanceMethod,
+              result: _distanceResultLabel(),
+              hint: _distanceHint(),
+            ),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
@@ -371,7 +413,6 @@ class _CellSignalCard extends StatelessWidget {
                             '${signal.wifiTxLinkSpeedMbps ?? '--'}/${signal.wifiRxLinkSpeedMbps ?? '--'} Mbps',
                       ),
                       _ChipText(label: '估算距离', value: signal.distanceLabel),
-                      _ChipText(label: '距离算法', value: signal.distanceMethod),
                     ]
                   : [
                       _ChipText(label: '运营商', value: signal.operatorName),
@@ -382,12 +423,100 @@ class _CellSignalCard extends StatelessWidget {
                           label: 'CI/NCI', value: _formatValue(signal.ci)),
                       _ChipText(label: '频点', value: _formatValue(signal.arfcn)),
                       _ChipText(label: '基站距离', value: signal.distanceLabel),
-                      _ChipText(label: '距离算法', value: signal.distanceMethod),
                     ],
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DistanceEstimatePanel extends StatelessWidget {
+  final Color color;
+  final String input;
+  final String method;
+  final String result;
+  final String hint;
+
+  const _DistanceEstimatePanel({
+    required this.color,
+    required this.input,
+    required this.method,
+    required this.result,
+    required this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.straighten, size: 18, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  result,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _EstimateLine(label: '输入值', value: input),
+          const SizedBox(height: 4),
+          _EstimateLine(label: '算法', value: method),
+          const SizedBox(height: 8),
+          Text(
+            hint,
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EstimateLine extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _EstimateLine({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '$label ',
+            style: const TextStyle(color: Colors.white38),
+          ),
+          TextSpan(
+            text: value,
+            style: const TextStyle(color: Colors.white70),
+          ),
+        ],
+      ),
+      style: const TextStyle(fontSize: 12, height: 1.35),
     );
   }
 }
