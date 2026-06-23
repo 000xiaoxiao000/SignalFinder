@@ -159,7 +159,7 @@ class _FinderSummary extends StatelessWidget {
                                     ? '${best!.wifiSsid} · ${best!.wifiBand} · ${best!.dbm ?? '--'} dBm'
                                     : hasFallbackOnly
                                         ? '系统未开放小区列表，已回退显示当前信号强度'
-                                        : '当前可见 $count 个小区，优先看 dBm 更接近 0 的位置',
+                                        : '当前可见 $count 个小区，按服务小区和信号强度排序',
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
@@ -222,24 +222,13 @@ class _CellSignalCard extends StatelessWidget {
 
   String _formatValue(Object? value) => value == null ? '--' : '$value';
 
-  String _signalInputLabel() {
-    final dbm = signal.dbm == null ? '--' : '${signal.dbm} dBm';
-    if (signal.isWifi) {
-      final frequency = signal.wifiFrequencyMhz == null
-          ? '--'
-          : '${signal.wifiFrequencyMhz} MHz';
-      final linkSpeed = signal.wifiLinkSpeedMbps == null
-          ? '--'
-          : '${signal.wifiLinkSpeedMbps} Mbps';
-      return 'RSSI $dbm · $frequency · 链路 $linkSpeed';
-    }
-    final radio = signal.radio.isEmpty ? '移动网络' : signal.radio;
-    return '$radio · dBm/RSRP $dbm';
-  }
-
   String _distanceResultLabel() {
     final meters = signal.estimatedDistanceMeters;
+    final confidence = signal.estimationConfidenceMeters;
     if (meters == null) return signal.distanceLabel;
+    if (signal.distanceMethod == '加权最小二乘' && confidence != null) {
+      return '${signal.distanceLabel} · 结果值 ${meters}m · 置信半径 ${confidence}m';
+    }
     return '${signal.distanceLabel} · 结果值 ${meters}m';
   }
 
@@ -248,10 +237,10 @@ class _CellSignalCard extends StatelessWidget {
       return '基于多个已知基站点位和 RSRP 约束收敛出来的位置距离，不是运营商精确定位。';
     }
     if (signal.isWifi) {
-      return '输入值是当前连接 Wi-Fi 的 RSSI、频段和链路速率；结果按范围显示，只适合比较相对远近。';
+      return '基于当前连接 Wi-Fi 的 RSSI、频段和链路速率估算；结果按范围显示，只适合比较相对远近。';
     }
     if (signal.distanceMethod == '路径损耗算法') {
-      return '输入值是手机读到的 dBm/RSRP；结果是路径损耗模型估算范围，遮挡、反射和基站功率都会改变结果。';
+      return '基于手机读到的 dBm/RSRP 做路径损耗估算；遮挡、反射和基站功率都会改变结果。';
     }
     return '信号或点位数据不足时，无法给出可靠的距离估算。';
   }
@@ -265,7 +254,7 @@ class _CellSignalCard extends StatelessWidget {
       shape: isLocked
           ? RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: color, width: 1.2),
+              side: BorderSide(color: color, width: 1),
             )
           : null,
       child: Padding(
@@ -333,30 +322,9 @@ class _CellSignalCard extends StatelessWidget {
                     TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
               ),
             ],
-            if (signal.distanceMethod == '加权最小二乘') ...[
-              const SizedBox(height: 8),
-              Text(
-                'WLS 估计位置：置信半径约 ${signal.estimationConfidenceMeters ?? 0} m。距离是基于 RSRP 和已知基站点位估算，不是运营商精确定位。',
-                style: TextStyle(color: color, fontSize: 12, height: 1.4),
-              ),
-            ] else if (signal.distanceMethod == '路径损耗算法') ...[
-              const SizedBox(height: 8),
-              Text(
-                '当前通过 dBm/RSRP 和路径损耗算法估算距离；有多个基站点位时会自动升级为 WLS 算法。',
-                style: TextStyle(color: color, fontSize: 12, height: 1.4),
-              ),
-            ],
-            if (isWifi) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Wi-Fi 距离由 RSSI、频段、链路速率和路径损耗模型估算，已按范围显示。墙体、人体遮挡、路由器功率和反射会带来明显误差，只适合比较相对远近。',
-                style: TextStyle(color: color, fontSize: 12, height: 1.4),
-              ),
-            ],
             const SizedBox(height: 14),
             _DistanceEstimatePanel(
               color: color,
-              input: _signalInputLabel(),
               method: signal.distanceMethod,
               result: _distanceResultLabel(),
               hint: _distanceHint(),
@@ -412,7 +380,6 @@ class _CellSignalCard extends StatelessWidget {
                         value:
                             '${signal.wifiTxLinkSpeedMbps ?? '--'}/${signal.wifiRxLinkSpeedMbps ?? '--'} Mbps',
                       ),
-                      _ChipText(label: '估算距离', value: signal.distanceLabel),
                     ]
                   : [
                       _ChipText(label: '运营商', value: signal.operatorName),
@@ -422,7 +389,6 @@ class _CellSignalCard extends StatelessWidget {
                       _ChipText(
                           label: 'CI/NCI', value: _formatValue(signal.ci)),
                       _ChipText(label: '频点', value: _formatValue(signal.arfcn)),
-                      _ChipText(label: '基站距离', value: signal.distanceLabel),
                     ],
             ),
           ],
@@ -434,14 +400,12 @@ class _CellSignalCard extends StatelessWidget {
 
 class _DistanceEstimatePanel extends StatelessWidget {
   final Color color;
-  final String input;
   final String method;
   final String result;
   final String hint;
 
   const _DistanceEstimatePanel({
     required this.color,
-    required this.input,
     required this.method,
     required this.result,
     required this.hint,
@@ -477,8 +441,6 @@ class _DistanceEstimatePanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          _EstimateLine(label: '输入值', value: input),
-          const SizedBox(height: 4),
           _EstimateLine(label: '算法', value: method),
           const SizedBox(height: 8),
           Text(
