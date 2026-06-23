@@ -465,6 +465,10 @@ class NetworkProvider extends ChangeNotifier {
     await _networkService.openVpnSettings();
   }
 
+  Future<void> openPrivateDnsSettings() async {
+    await _networkService.openPrivateDnsSettings();
+  }
+
   Future<void> openUsageAccessSettings() async {
     _waitingForUsageAccessPermission = true;
     await _networkService.openUsageAccessSettings();

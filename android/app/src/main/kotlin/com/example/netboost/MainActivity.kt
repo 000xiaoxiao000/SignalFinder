@@ -108,6 +108,10 @@ class MainActivity : FlutterActivity() {
                     openVpnSettings()
                     result.success(null)
                 }
+                "openPrivateDnsSettings" -> {
+                    openPrivateDnsSettings()
+                    result.success(null)
+                }
                 "checkRootStatus" -> runInBackground(result) { checkRootStatus() }
                 "runRootCommand" -> {
                     val commandId = call.argument<String>("commandId").orEmpty()
@@ -1350,6 +1354,16 @@ class MainActivity : FlutterActivity() {
         openFirstAvailableSettings(
             listOf(
                 Intent(Settings.ACTION_VPN_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS),
+            )
+        )
+    }
+
+    private fun openPrivateDnsSettings() {
+        openFirstAvailableSettings(
+            listOf(
+                Intent("android.settings.PRIVATE_DNS_SETTINGS"),
+                Intent(Settings.ACTION_WIRELESS_SETTINGS),
                 Intent(Settings.ACTION_SETTINGS),
             )
         )

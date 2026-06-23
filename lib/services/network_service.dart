@@ -88,6 +88,12 @@ class NetworkService {
     await _mobileNetworkChannel.invokeMethod<void>('openVpnSettings');
   }
 
+  Future<void> openPrivateDnsSettings() async {
+    if (!Platform.isAndroid) return;
+    _logs.info('打开私有 DNS 设置');
+    await _mobileNetworkChannel.invokeMethod<void>('openPrivateDnsSettings');
+  }
+
   Future<List<InstalledApp>> getInstalledApps() async {
     if (!Platform.isAndroid) return const [];
     final result = await _mobileNetworkChannel.invokeMethod<List<dynamic>>(

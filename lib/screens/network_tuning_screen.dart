@@ -161,12 +161,6 @@ class _NetworkTuningScreenState extends State<NetworkTuningScreen> {
                 subtitle: '高风险能力仅说明，不在普通版本中执行',
               ),
               const _TuningCard(
-                title: 'DNS 优化',
-                capability: 'App 内可测速',
-                detail:
-                    '优先使用本应用 DNS 优选页测试解析延迟。全局私有 DNS 需要用户在系统设置中配置；写系统 resolver 文件需要 Root。',
-              ),
-              const _TuningCard(
                 title: 'TCP 拥塞控制 / 缓冲区',
                 capability: '需 Root',
                 detail:
